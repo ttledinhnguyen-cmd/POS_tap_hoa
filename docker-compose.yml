@@ -1,0 +1,21 @@
+services:
+  app:
+    build: .
+    container_name: pos-tap-hoa
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    environment:
+      # Đổi DOMAIN trong file .env (xem .env.example)
+      DOMAIN: ${DOMAIN:-pos.example.com}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    volumes:
+      # Persist cert Let's Encrypt qua các lần restart
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

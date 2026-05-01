@@ -1,0 +1,52 @@
+# Caddy config cho Tạp Hóa POS
+# Domain lấy từ biến môi trường DOMAIN, mặc định pos.example.com
+# Đổi domain bằng cách set biến trong docker-compose.yml hoặc .env
+
+{$DOMAIN:pos.example.com} {
+	# Auto HTTPS - Caddy tự xin Let's Encrypt cert
+	# Email cho Let's Encrypt: set qua biến ACME_EMAIL nếu muốn
+	# Bỏ comment dòng dưới nếu cần
+	# tls {$ACME_EMAIL}
+
+	root * /srv
+
+	# Compress mọi response - quan trọng cho 4G/3G ở VN
+	encode zstd gzip
+
+	# ===== Cache strategy =====
+	# Vite hash file name trong /assets/* nên cache vĩnh viễn an toàn
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	# Service worker và register - phải fresh để user nhận update PWA
+	@sw path /sw.js /registerSW.js /workbox-*.js
+	header @sw {
+		Cache-Control "no-cache, no-store, must-revalidate"
+		Pragma "no-cache"
+	}
+
+	# index.html - không cache để user thấy bản mới nhất
+	@html path /index.html /
+	header @html Cache-Control "no-cache, no-store, must-revalidate"
+
+	# Manifest và icon - cache vừa phải
+	@meta path /manifest.webmanifest /favicon.svg /icon-*.png
+	header @meta Cache-Control "public, max-age=86400"
+
+	# ===== Security headers =====
+	header {
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(self), microphone=()"
+		# Strict-Transport-Security có sẵn từ Caddy khi dùng HTTPS
+		-Server
+	}
+
+	# ===== SPA routing =====
+	# Mọi route không phải file thật → trả về index.html
+	# để react-router xử lý
+	try_files {path} /index.html
+
+	file_server
+}

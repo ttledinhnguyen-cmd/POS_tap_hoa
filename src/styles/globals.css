@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    font-feature-settings: "cv02", "cv11", "ss01";
+    overscroll-behavior-y: contain;
+  }
+
+  /* Số tiền dùng tabular figures để các số thẳng cột */
+  .tabular-nums,
+  .font-mono {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Tránh zoom khi tap input trên iOS */
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+@layer utilities {
+  /* Vùng an toàn cho iPhone notch / Android nav bar */
+  .safe-top {
+    padding-top: env(safe-area-inset-top);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+
+  /* Hiệu ứng nút khi nhấn — phản hồi tức thì */
+  .press {
+    @apply transition-transform active:scale-[0.97];
+  }
+}
