@@ -48,6 +48,10 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
+    // Allow tunneling host (ngrok/cloudflare) khi demo cho chủ shop.
+    // Chỉ ảnh hưởng dev server — production build serve qua Caddy không bị ràng buộc này.
+    // Leading dot = subdomain wildcard.
+    allowedHosts: ["majorette-blatantly-swerve.ngrok-free.dev", "localhost", ".ngrok-free.dev", ".ngrok-free.app", ".ngrok.app", ".trycloudflare.com"],
   },
   build: {
     rollupOptions: {
