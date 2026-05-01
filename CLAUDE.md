@@ -392,3 +392,41 @@ Q5: Outbox = **browser worker only** (drain on `online` event +
 - switchOrg console-direct UI không re-render (real path OK, defer)
 - Failed permanent outbox jobs không có UI retry (Phase 7+)
 - Image upload Storage bucket (Sprint 7)
+
+---
+
+## QUY TRÌNH GIT (sau mỗi phase)
+
+**Repo URL**: https://github.com/ttledinhnguyen-cmd/POS_tap_hoa.git
+
+**Sau mỗi phase APPROVED, commit + push:**
+```bash
+git add .
+git commit -m "Phase X: mô tả ngắn gọn"
+git push
+```
+
+**Pull latest từ máy khác (vd. Mac chủ shop kéo từ Win dev):**
+```bash
+git pull
+```
+
+**Nếu lỡ commit secret** (.env.local, API key, JWT, password trong code):
+```bash
+git rm --cached <file>
+git commit -m "Remove secret <file>"
+git push
+```
+→ Sau đó **ROTATE secret ngay**: Supabase Dashboard regenerate anon key, MISA app secret reset, eSMS API key recreate, etc. KHÔNG dựa vào git history rewrite (`git filter-branch` / `git filter-repo`) — giả định mọi commit đã push đều public.
+
+**Branch policy**: chỉ `main`, solo dev không cần feature branches. Khi onboard dev thứ 2 mới chia branch.
+
+**Files BẮT BUỘC trong .gitignore** (đã setup sẵn — verify khi clone máy mới):
+- `.env`, `.env.local`, `.env.*.local` — secret env
+- `node_modules/`, `dist/` — build artifacts
+- `*.tsbuildinfo`, `vite.config.{d.ts,js}` — TypeScript composite project cache
+- `supabase/.temp/` — Supabase CLI cache (chứa project ref + owner email PII)
+
+**Auth Git**: dùng Git Credential Manager (GCM) đi kèm Git for Windows. Lần `git push` đầu sẽ mở browser popup để OAuth GitHub. Token cached trong Windows Credential Manager — không cần PAT thủ công.
+
+**Note về GCM trong terminal non-TTY**: nếu `git push` chạy từ Bash script / Claude Code subprocess, GCM popup có thể không hiện. Workaround: chạy `git push` lần đầu từ PowerShell GUI (manual), sau đó các lần sau token cached → automation push được.
