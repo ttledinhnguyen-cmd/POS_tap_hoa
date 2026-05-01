@@ -1679,66 +1679,251 @@ await fetch(`https://fcm.googleapis.com/v1/projects/${PROJECT_ID}/messages:send`
 });
 ```
 
-### 3.4 Web Bluetooth — In hóa đơn nhiệt 58mm
+### 3.4 Máy in nhiệt 58mm — Web Bluetooth + Web USB
 
-**Mục đích:** in hoá đơn ngay tại quầy. Máy in BT phổ biến: Xprinter XP-P200,
-RP58, GP-58. Dùng tập lệnh ESC/POS chuẩn.
+**Mục đích:** in hoá đơn ngay tại quầy. Hỗ trợ cả 2 loại kết nối phổ biến ở VN:
 
-**Lưu ý support:** Web Bluetooth chạy được trên Chrome desktop + Chrome
-Android, **KHÔNG có trên iOS Safari**. Trên iPhone phải dùng Capacitor wrapper
-(giai đoạn 3) với plugin native Bluetooth.
+| Loại | Máy in điển hình | Giá tham khảo | Use case |
+|---|---|---|---|
+| **Bluetooth** | Xprinter XP-P200, RP58, GP-58 | 400-700k VND | Mobile-first, có pin, không dây |
+| **USB** | Xprinter XP-200, Star TSP100, Epson TM-T20 | 250-500k VND | Quầy PC truyền thống, plug-and-play |
 
-**Library:** dùng `escpos-buffer` (~30KB) để build buffer ESC/POS, gửi qua
-Web Bluetooth.
+**Browser support:** Web Bluetooth + Web USB chạy trên Chrome desktop + Chrome
+Android. **KHÔNG iOS Safari, KHÔNG Firefox** → cần Capacitor wrapper
+(Sprint 9+) cho iOS.
+
+**Common protocol:** Cả 2 loại nhận lệnh **ESC/POS** chuẩn. Chỉ khác cách gửi
+buffer xuống device. Receipt template dùng chung — chỉ wrap-and-send khác nhau.
+
+**Library:** `escpos-buffer` (~30KB) — build ESC/POS commands buffer.
 
 ```bash
 npm i escpos-buffer
 ```
 
-**Adapter:**
+#### Adapter pattern (BẮT BUỘC)
+
+```typescript
+// src/integrations/printer/types.ts
+export type PrinterType = 'bluetooth' | 'usb';
+
+export interface PrinterAdapter {
+  type: PrinterType;
+  isSupported(): boolean;
+  pair(): Promise<{ id: string; name: string }>;
+  getStored(): Promise<{ id: string; name: string } | null>;
+  print(buffer: Uint8Array): Promise<void>;
+  forget(): Promise<void>;
+}
+```
+
+#### Bluetooth adapter
 
 ```typescript
 // src/integrations/printer/bluetooth.ts
-import { EscPos } from 'escpos-buffer';
+import type { PrinterAdapter } from './types';
 
-const PRINTER_SERVICE_UUID = '000018f0-0000-1000-8000-00805f9b34fb'; // generic
-const PRINTER_CHAR_UUID    = '00002af1-0000-1000-8000-00805f9b34fb';
+const SERVICE_UUID = '000018f0-0000-1000-8000-00805f9b34fb';
+const CHAR_UUID    = '00002af1-0000-1000-8000-00805f9b34fb';
+const STORAGE_KEY  = 'printer.bluetooth.deviceId';
 
-export async function pairPrinter(): Promise<BluetoothDevice> {
-  const device = await navigator.bluetooth.requestDevice({
-    filters: [{ services: [PRINTER_SERVICE_UUID] }],
-    optionalServices: [PRINTER_SERVICE_UUID],
-  });
-  // Lưu device.id vào localStorage để lần sau auto-reconnect
-  localStorage.setItem('printer_device_id', device.id);
-  return device;
+export const bluetoothPrinter: PrinterAdapter = {
+  type: 'bluetooth',
+
+  isSupported() {
+    return 'bluetooth' in navigator && typeof navigator.bluetooth.requestDevice === 'function';
+  },
+
+  async pair() {
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [SERVICE_UUID] }],
+      optionalServices: [SERVICE_UUID],
+    });
+    localStorage.setItem(STORAGE_KEY, device.id);
+    return { id: device.id, name: device.name ?? 'Máy in BT' };
+  },
+
+  async getStored() {
+    const id = localStorage.getItem(STORAGE_KEY);
+    if (!id) return null;
+    // Chrome 115+ có navigator.bluetooth.getDevices() trả devices đã pair
+    const devices = await navigator.bluetooth.getDevices();
+    const device = devices.find((d) => d.id === id);
+    return device ? { id: device.id, name: device.name ?? 'Máy in BT' } : null;
+  },
+
+  async print(buffer) {
+    const id = localStorage.getItem(STORAGE_KEY);
+    if (!id) throw new Error('Chưa pair máy in Bluetooth');
+    const devices = await navigator.bluetooth.getDevices();
+    const device = devices.find((d) => d.id === id);
+    if (!device) throw new Error('Máy in không tìm thấy');
+
+    const server = await device.gatt!.connect();
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    const char = await service.getCharacteristic(CHAR_UUID);
+
+    // BLE giới hạn 200 byte/chunk
+    for (let i = 0; i < buffer.length; i += 200) {
+      await char.writeValueWithoutResponse(buffer.slice(i, i + 200));
+    }
+  },
+
+  async forget() {
+    localStorage.removeItem(STORAGE_KEY);
+  },
+};
+```
+
+#### USB adapter
+
+```typescript
+// src/integrations/printer/usb.ts
+import type { PrinterAdapter } from './types';
+
+// Class 0x07 = USB Printer Class. Một số máy TQ không khai đúng class
+// → fallback filter rỗng (request user pick device).
+const STORAGE_KEY = 'printer.usb.identity';
+
+interface StoredId { vendorId: number; productId: number; name: string }
+
+export const usbPrinter: PrinterAdapter = {
+  type: 'usb',
+
+  isSupported() {
+    return 'usb' in navigator && typeof navigator.usb.requestDevice === 'function';
+  },
+
+  async pair() {
+    const device = await navigator.usb.requestDevice({
+      filters: [{ classCode: 0x07 }, {}], // printer class, fallback rỗng
+    });
+    const id: StoredId = {
+      vendorId: device.vendorId,
+      productId: device.productId,
+      name: device.productName ?? 'Máy in USB',
+    };
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(id));
+    return { id: `${device.vendorId}-${device.productId}`, name: id.name };
+  },
+
+  async getStored() {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const stored = JSON.parse(raw) as StoredId;
+    // navigator.usb.getDevices() trả device đã grant permission
+    const devices = await navigator.usb.getDevices();
+    const device = devices.find(
+      (d) => d.vendorId === stored.vendorId && d.productId === stored.productId,
+    );
+    return device
+      ? { id: `${device.vendorId}-${device.productId}`, name: stored.name }
+      : null;
+  },
+
+  async print(buffer) {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) throw new Error('Chưa pair máy in USB');
+    const stored = JSON.parse(raw) as StoredId;
+    const devices = await navigator.usb.getDevices();
+    const device = devices.find(
+      (d) => d.vendorId === stored.vendorId && d.productId === stored.productId,
+    );
+    if (!device) throw new Error('Máy in USB không tìm thấy');
+
+    await device.open();
+    if (device.configuration === null) await device.selectConfiguration(1);
+
+    // Tìm interface có endpoint OUT
+    const iface = device.configuration!.interfaces.find((i) =>
+      i.alternates[0].endpoints.some((e) => e.direction === 'out'),
+    );
+    if (!iface) throw new Error('Không tìm được endpoint OUT');
+    const endpoint = iface.alternates[0].endpoints.find((e) => e.direction === 'out')!;
+
+    await device.claimInterface(iface.interfaceNumber);
+
+    // USB chunk 64 byte (an toàn cho most thermal printers)
+    for (let i = 0; i < buffer.length; i += 64) {
+      await device.transferOut(endpoint.endpointNumber, buffer.slice(i, i + 64));
+    }
+
+    await device.releaseInterface(iface.interfaceNumber);
+    await device.close();
+  },
+
+  async forget() {
+    localStorage.removeItem(STORAGE_KEY);
+  },
+};
+```
+
+#### Factory + Settings UI
+
+```typescript
+// src/integrations/printer/index.ts
+import { bluetoothPrinter } from './bluetooth';
+import { usbPrinter } from './usb';
+import type { PrinterAdapter, PrinterType } from './types';
+
+export const printerAdapters: Record<PrinterType, PrinterAdapter> = {
+  bluetooth: bluetoothPrinter,
+  usb: usbPrinter,
+};
+
+export function getSupportedAdapters(): PrinterAdapter[] {
+  return Object.values(printerAdapters).filter((a) => a.isSupported());
 }
 
-export async function printReceipt(receipt: ReceiptData) {
-  const device = await getStoredDevice();          // hoặc pair lần đầu
-  const server = await device.gatt!.connect();
-  const service = await server.getPrimaryService(PRINTER_SERVICE_UUID);
-  const characteristic = await service.getCharacteristic(PRINTER_CHAR_UUID);
+export async function getActivePrinter(): Promise<PrinterAdapter | null> {
+  for (const adapter of getSupportedAdapters()) {
+    const stored = await adapter.getStored();
+    if (stored) return adapter;
+  }
+  return null;
+}
+```
 
+**Settings → Máy in** UI flow:
+- Status card: hiển thị adapter đang active (BT/USB) + tên máy in.
+- 2 button **Pair**: 1 cho BT, 1 cho USB. Chỉ render adapter `isSupported()=true`.
+- Sau pair: button "In thử" + "Quên máy in".
+
+#### Receipt template chung
+
+```typescript
+// src/integrations/printer/receipt-template.ts
+import { EscPos } from 'escpos-buffer';
+import { formatVND } from '@/lib/format';
+
+export interface ReceiptData {
+  shopName: string;
+  shopAddress?: string;
+  shopPhone?: string;
+  items: { name: string; quantity: number; unitPrice: number; lineTotal: number }[];
+  total: number;
+  invoiceLookupCode?: string;
+}
+
+export function buildReceiptBuffer(receipt: ReceiptData): Uint8Array {
   const pos = new EscPos();
-  pos.setCharacterCodeTable(0x10); // bảng mã VN
+  pos.setCharacterCodeTable(0x10); // VN
   pos.setAlignment('center');
   pos.setBold(true);
   pos.print(receipt.shopName);
-  pos.feed(1);
   pos.setBold(false);
   pos.setSize(0, 0);
-  pos.print(receipt.shopAddress ?? '');
-  pos.print(receipt.shopPhone ?? '');
+  if (receipt.shopAddress) pos.print(receipt.shopAddress);
+  if (receipt.shopPhone) pos.print(receipt.shopPhone);
   pos.feed(1);
   pos.print('--------------------------------');
   pos.setAlignment('left');
 
   for (const item of receipt.items) {
     pos.print(item.name);
-    const qtyLine = `  ${item.quantity} x ${formatVND(item.unitPrice)}`;
-    const totalStr = `${formatVND(item.lineTotal)}đ`;
-    pos.print(padBetween(qtyLine, totalStr, 32));
+    const qty = `  ${item.quantity} x ${formatVND(item.unitPrice)}`;
+    const total = `${formatVND(item.lineTotal)}đ`;
+    pos.print(padBetween(qty, total, 32));
   }
 
   pos.print('--------------------------------');
@@ -1752,18 +1937,12 @@ export async function printReceipt(receipt: ReceiptData) {
     pos.print('Tra cứu HĐĐT:');
     pos.print('tracuuhoadon.gdt.gov.vn');
     pos.print(`Mã: ${receipt.invoiceLookupCode}`);
-    // QR code vào trang tra cứu
     pos.qrCode(`https://tracuuhoadon.gdt.gov.vn/tracuu?code=${receipt.invoiceLookupCode}`);
   }
 
   pos.feed(2);
   pos.cut();
-
-  const buf = pos.flush();
-  // Gửi buffer theo chunk 200 byte (giới hạn BLE)
-  for (let i = 0; i < buf.length; i += 200) {
-    await characteristic.writeValueWithoutResponse(buf.slice(i, i + 200));
-  }
+  return pos.flush();
 }
 
 function padBetween(left: string, right: string, width: number) {
@@ -1772,12 +1951,20 @@ function padBetween(left: string, right: string, width: number) {
 }
 ```
 
-**Auto-reconnect:** lưu `device.id`, khi user mở app lại, gọi
-`navigator.bluetooth.getDevices()` để lấy device đã pair từ trước (Chrome
-115+).
+**Print flow:**
 
-**Settings UI:** trang `Cài đặt` → `Máy in` → 3 nút: "Pair máy in", "In thử",
-"Quên máy in".
+```typescript
+const adapter = await getActivePrinter();
+if (!adapter) throw new Error('Chưa cấu hình máy in');
+const buffer = buildReceiptBuffer(receiptData);
+await adapter.print(buffer);
+```
+
+#### iOS fallback (Sprint 9+ Capacitor)
+
+- **BT**: `@capacitor-community/bluetooth-le` — wrap native BLE API
+- **USB OTG**: chỉ Android (`@capacitor-community/usb`). iOS không hỗ trợ USB
+  OTG cho thermal printer → **user iOS chỉ in qua Bluetooth**.
 
 ---
 
