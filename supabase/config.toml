@@ -45,6 +45,7 @@ enable_signup = true
 double_confirm_changes = true
 enable_confirmations = false
 
-# Edge Functions sẽ thêm ở các sprint sau (sepay-webhook, issue-invoice, send-otp, ...).
-# CLI v2.96+ yêu cầu verify_jwt khai báo per-function: [functions.sepay-webhook]
-# Ở Sprint 1 chưa có function nào nên section này để trống.
+# Edge Functions
+# CLI v2.96+ yêu cầu verify_jwt khai báo per-function: [functions.<name>]
+[functions.admin-create-shop]
+verify_jwt = true

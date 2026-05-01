@@ -124,3 +124,77 @@ export interface ReceiveItemInput {
   priceBuy: number;
   currentStock: number; // chỉ dùng UI hiển thị, không gửi server
 }
+
+// =============================================================================
+// Sprint Admin SaaS — subscriptions, shops, dashboard
+// =============================================================================
+
+export type SubscriptionStatus =
+  | "trial"
+  | "active"
+  | "expired"
+  | "suspended"
+  | "cancelled";
+export type SubscriptionTier = "standard" | "pro";
+export type PaymentMethod = "bank_transfer" | "cash" | "other";
+
+export interface Subscription {
+  id: string;
+  orgId: string;
+  tier: SubscriptionTier;
+  status: SubscriptionStatus;
+  monthlyPrice: number; // VND
+  trialUntilDate: string | null; // YYYY-MM-DD
+  paidUntilDate: string | null;
+  notes: string | null;
+  createdAt: string; // ISO timestamptz (admin pages render trực tiếp)
+  updatedAt: string;
+}
+
+export interface SubscriptionPayment {
+  id: string;
+  subscriptionId: string;
+  amount: number;
+  paymentDate: string; // YYYY-MM-DD
+  periodMonths: number;
+  paymentMethod: PaymentMethod;
+  recordedBy: string | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+/**
+ * Shape return từ admin_list_shops RPC. snake_case khớp Postgres OUT params.
+ */
+export interface ShopWithStats {
+  org_id: string;
+  org_name: string;
+  owner_email: string;
+  status: SubscriptionStatus;
+  trial_until_date: string | null;
+  paid_until_date: string | null;
+  monthly_price: number;
+  latitude: number | null;
+  longitude: number | null;
+  address_full: string | null;
+  last_order_at: string | null;
+  total_revenue: number;
+  products_count: number;
+  orders_count: number;
+  created_at: string;
+}
+
+/**
+ * Shape return từ admin_dashboard_metrics RPC.
+ */
+export interface DashboardMetrics {
+  total_shops: number;
+  active_shops: number;
+  trial_shops: number;
+  expired_shops: number;
+  suspended_shops: number;
+  mrr: number;
+  signups_this_month: number;
+  total_revenue_all_shops: number;
+  churn_this_month: number;
+}

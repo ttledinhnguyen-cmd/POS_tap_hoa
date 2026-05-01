@@ -8,6 +8,7 @@ import type { Role } from "@/integrations/auth";
 import { productsSync } from "@/integrations/sync/products-sync";
 import { ordersSync } from "@/integrations/sync/orders-sync";
 import { inventorySync } from "@/integrations/sync/inventory-sync";
+import type { Subscription } from "@/types";
 import { seedIfEmptyForOrg } from "@/lib/seed";
 
 /**
@@ -49,6 +50,10 @@ interface AuthState {
   status: AuthStatus;
   error: string | null;
 
+  // Sprint Admin SaaS
+  isSuperAdmin: boolean;
+  currentSubscription: Subscription | null;
+
   // actions
   init: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
@@ -69,6 +74,8 @@ interface AuthState {
   loadMemberships: () => Promise<void>;
   switchOrg: (orgId: string) => Promise<void>;
   refresh: () => Promise<void>;
+  /** Sprint Admin: refetch isSuperAdmin + currentSubscription */
+  loadAdminContext: () => Promise<void>;
 }
 
 /**
@@ -137,6 +144,8 @@ export const useAuthStore = create<AuthState>()(
       currentOrgId: null,
       status: "loading",
       error: null,
+      isSuperAdmin: false,
+      currentSubscription: null,
 
       init: async () => {
         if (_initialized) return;
@@ -160,6 +169,8 @@ export const useAuthStore = create<AuthState>()(
               currentOrgId: null,
               status: "unauthenticated",
               error: null,
+              isSuperAdmin: false,
+              currentSubscription: null,
             });
             // Cleanup sync layer (defer để release auth lock, dù chỉ là method
             // sync, không hại nhưng nhất quán pattern)
@@ -315,8 +326,11 @@ export const useAuthStore = create<AuthState>()(
             error: null,
           });
           // Trigger sync cho org hiện tại (defer để giữ pattern an toàn,
-          // tránh chặn render)
-          setTimeout(() => syncForOrg(nextOrgId), 0);
+          // tránh chặn render). Sprint Admin: cũng load isSuperAdmin + sub.
+          setTimeout(() => {
+            syncForOrg(nextOrgId);
+            get().loadAdminContext();
+          }, 0);
         } catch (err) {
           set({ error: authErrorMessage(err), status: "unauthenticated" });
         }
@@ -337,6 +351,57 @@ export const useAuthStore = create<AuthState>()(
         // lần sau dùng cache.
         set({ currentOrgId: orgId });
         await syncForOrg(orgId);
+        await get().loadAdminContext();
+      },
+
+      loadAdminContext: async () => {
+        // is_super_admin RPC
+        try {
+          const { data: isAdmin } = await supabase.rpc("is_super_admin");
+          set({ isSuperAdmin: Boolean(isAdmin) });
+        } catch (err) {
+          if (import.meta.env.DEV) {
+            console.warn("[auth.store] is_super_admin check failed:", err);
+          }
+          set({ isSuperAdmin: false });
+        }
+        // Load subscription cho currentOrg
+        const orgId = get().currentOrgId;
+        if (!orgId) {
+          set({ currentSubscription: null });
+          return;
+        }
+        try {
+          const { data, error } = await supabase
+            .from("subscriptions")
+            .select("*")
+            .eq("org_id", orgId)
+            .maybeSingle();
+          if (error) throw error;
+          if (!data) {
+            set({ currentSubscription: null });
+            return;
+          }
+          set({
+            currentSubscription: {
+              id: data.id,
+              orgId: data.org_id,
+              tier: data.tier,
+              status: data.status,
+              monthlyPrice: Number(data.monthly_price),
+              trialUntilDate: data.trial_until_date,
+              paidUntilDate: data.paid_until_date,
+              notes: data.notes,
+              createdAt: data.created_at,
+              updatedAt: data.updated_at,
+            },
+          });
+        } catch (err) {
+          if (import.meta.env.DEV) {
+            console.warn("[auth.store] load subscription failed:", err);
+          }
+          set({ currentSubscription: null });
+        }
       },
 
       refresh: async () => {

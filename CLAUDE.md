@@ -395,6 +395,67 @@ Q5: Outbox = **browser worker only** (drain on `online` event +
 
 ---
 
+## Sprint Admin SaaS — Đã xong (2026-05-01)
+
+Multi-tenant B2B infrastructure cho phép founder quản lý subscriptions của các tiệm khách.
+
+**Migration 0010_subscriptions_admin.sql:**
+- 3 tables: `subscriptions` (UNIQUE org_id), `subscription_payments`, `super_admins`
+- Geocoding columns trên organizations: `latitude/longitude/address_full` (cho map feature defer chờ Goong key)
+- 10 RPCs SECURITY DEFINER: `is_super_admin`, `record_payment`, `extend_trial`, `suspend_shop`, `unsuspend_shop`, `admin_list_shops`, `admin_dashboard_metrics`, `admin_create_shop`, `bootstrap_super_admin`, `update_organization`
+- RLS dùng EXISTS subquery trực tiếp (KHÔNG dùng `user_org_ids()` để tránh recursion)
+
+**Edge Function `admin-create-shop`** deployed:
+- Verify caller is super_admin → call admin_create_shop RPC → invite owner email qua `auth.admin.inviteUserByEmail` → insert membership với service_role
+- Endpoint: `https://lidkbryncjlwqquadywn.supabase.co/functions/v1/admin-create-shop`
+
+**Frontend code:**
+- `auth.ts`: `isSuperAdmin` + `currentSubscription` state, `loadAdminContext()` action
+- `AuthGuard.tsx`: subscription expired/suspended gate với allow-list (`/reports`, `/settings`, `/orders`, `/admin/*`, `/subscription-expired`); super_admin BYPASS
+- `AdminGuard.tsx`: wrap admin routes (chỉ super_admin)
+- 5 pages mới: AdminDashboard, AdminShops, AdminShopDetail, AdminShopNew, SubscriptionExpired
+- Sidebar: section "QUẢN TRỊ" conditional render khi isSuperAdmin
+- /signup public DISABLE — render notice page với contact info qua `VITE_SUPPORT_ZALO` + `VITE_SUPPORT_EMAIL` env
+
+**Bootstrap super_admin (chỉ làm 1 lần):**
+```sql
+-- Cách 1 (khuyến nghị): SQL Editor Dashboard
+INSERT INTO super_admins (user_id)
+VALUES ((SELECT id FROM auth.users WHERE email = 'founder@example.com'));
+
+-- Cách 2: Sau khi đăng nhập, gọi RPC qua console:
+-- await supabase.rpc('bootstrap_super_admin', { p_email: 'founder@example.com' })
+-- RPC tự lock sau lần đầu (super_admins table có row → reject).
+```
+
+**Existing orgs backfill:** đã insert default trial 90 ngày cho 3 orgs đã có
+trước khi migration push (Tiệm P1C, etc.). Nếu cần extend, gọi `extend_trial`.
+
+**Decisions baked:**
+- 1 tier 'standard' default 199.000đ/tháng, 'pro' tier schema-only (UI defer)
+- Trial flexible per shop (admin set qua extend_trial)
+- /signup public DISABLE — chỉ admin tạo shop hộ khách
+- Suspend KHÔNG tự động unsuspend khi paid (admin manual)
+- Expired access allow-list: `/reports`, `/settings`, `/orders`, `/admin/*`, `/subscription-expired`
+- Email invite qua Supabase built-in (không build custom)
+- Bootstrap admin: SQL manual sau migration
+
+**Tech debt mới:**
+- Map feature (AddressAutocomplete + ShopsMap) defer chờ Goong key (schema sẵn lat/lng)
+- Audit log cho admin actions: defer Phase 2
+- "Login as" impersonate: defer Phase 3 (security risk)
+- Multi-tier UI (Pro 399k): schema sẵn, UI defer
+- Charts (revenue line chart): dùng text simple, recharts defer
+- MFA cho super_admin (xem revenue all shops): defer Phase 2
+- Banner "trial < 7 ngày" trong app: defer Phase 2
+- Terms of service + Privacy policy (Nghị định 13/2023 PDP) trước khi launch public
+
+**Env vars optional:**
+- `VITE_SUPPORT_ZALO` — số Zalo support (default `0901234567`)
+- `VITE_SUPPORT_EMAIL` — email support (default `support@taphoa.app`)
+
+---
+
 ## QUY TRÌNH GIT (sau mỗi phase)
 
 **Repo URL**: https://github.com/ttledinhnguyen-cmd/POS_tap_hoa.git

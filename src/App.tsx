@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { POSPage } from "@/pages/POSPage";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { AuthGuard } from "@/components/AuthGuard";
+import { AdminGuard } from "@/components/AdminGuard";
 import { PageLoader } from "@/components/PageLoader";
 import { useAuthStore } from "@/stores/auth";
 import { outboxWorker } from "@/integrations/sync/outbox-worker";
@@ -52,6 +53,31 @@ const InventoryReceivePage = lazy(() =>
 );
 const InventoryPage = lazy(() =>
   import("@/pages/InventoryPage").then((m) => ({ default: m.InventoryPage })),
+);
+const SubscriptionExpiredPage = lazy(() =>
+  import("@/pages/SubscriptionExpiredPage").then((m) => ({
+    default: m.SubscriptionExpiredPage,
+  })),
+);
+const AdminDashboardPage = lazy(() =>
+  import("@/pages/admin/AdminDashboardPage").then((m) => ({
+    default: m.AdminDashboardPage,
+  })),
+);
+const AdminShopsPage = lazy(() =>
+  import("@/pages/admin/AdminShopsPage").then((m) => ({
+    default: m.AdminShopsPage,
+  })),
+);
+const AdminShopDetailPage = lazy(() =>
+  import("@/pages/admin/AdminShopDetailPage").then((m) => ({
+    default: m.AdminShopDetailPage,
+  })),
+);
+const AdminShopNewPage = lazy(() =>
+  import("@/pages/admin/AdminShopNewPage").then((m) => ({
+    default: m.AdminShopNewPage,
+  })),
 );
 
 const VISIBILITY_PULL_THROTTLE_MS = 30_000;
@@ -183,6 +209,65 @@ export default function App() {
                 <AppLayout>
                   <InventoryReceivePage />
                 </AppLayout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/subscription-expired"
+            element={
+              <AuthGuard allowExpired>
+                <AppLayout>
+                  <SubscriptionExpiredPage />
+                </AppLayout>
+              </AuthGuard>
+            }
+          />
+          {/* Admin routes — AdminGuard wrap. AuthGuard allowExpired vì super_admin bypass. */}
+          <Route
+            path="/admin"
+            element={
+              <AuthGuard allowExpired>
+                <AdminGuard>
+                  <AppLayout>
+                    <AdminDashboardPage />
+                  </AppLayout>
+                </AdminGuard>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/admin/shops"
+            element={
+              <AuthGuard allowExpired>
+                <AdminGuard>
+                  <AppLayout>
+                    <AdminShopsPage />
+                  </AppLayout>
+                </AdminGuard>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/admin/shops/new"
+            element={
+              <AuthGuard allowExpired>
+                <AdminGuard>
+                  <AppLayout>
+                    <AdminShopNewPage />
+                  </AppLayout>
+                </AdminGuard>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/admin/shops/:id"
+            element={
+              <AuthGuard allowExpired>
+                <AdminGuard>
+                  <AppLayout>
+                    <AdminShopDetailPage />
+                  </AppLayout>
+                </AdminGuard>
               </AuthGuard>
             }
           />

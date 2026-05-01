@@ -1,15 +1,18 @@
 import { NavLink } from "react-router-dom";
 import {
   BarChart3,
+  Building2,
   type LucideIcon,
   Package,
   Package2,
   Receipt,
   ScanLine,
   Settings,
+  ShieldCheck,
   Store,
 } from "lucide-react";
 import { UserBlock } from "./UserBlock";
+import { useAuthStore } from "@/stores/auth";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -28,11 +31,19 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/settings", icon: Settings, label: "Cài đặt" },
 ];
 
+const ADMIN_ITEMS: NavItem[] = [
+  { to: "/admin", icon: ShieldCheck, label: "Tổng quan", end: true },
+  { to: "/admin/shops", icon: Building2, label: "Cửa hàng" },
+];
+
 /**
  * Sidebar — chỉ hiển thị md+ (>=768px).
  * Sticky left, height = viewport, có UserBlock ở dưới cùng.
+ *
+ * Section "QUẢN TRỊ" chỉ render khi useAuthStore.isSuperAdmin = true.
  */
 export function Sidebar() {
+  const isSuperAdmin = useAuthStore((s) => s.isSuperAdmin);
   return (
     <aside
       className={cn(
@@ -51,7 +62,7 @@ export function Sidebar() {
       </div>
 
       {/* Nav items */}
-      <nav className="flex-1 p-3 space-y-1">
+      <nav className="flex-1 p-3 space-y-1 overflow-y-auto">
         {NAV_ITEMS.map((item) => (
           <NavLink
             key={item.to}
@@ -71,6 +82,35 @@ export function Sidebar() {
             <span>{item.label}</span>
           </NavLink>
         ))}
+
+        {isSuperAdmin && (
+          <>
+            <div className="pt-4 pb-1">
+              <p className="px-3 text-[10px] uppercase tracking-wider font-semibold text-ink-subtle">
+                Quản trị
+              </p>
+            </div>
+            {ADMIN_ITEMS.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  cn(
+                    "flex items-center gap-3 px-3 py-2 rounded-lg",
+                    "min-h-[40px] text-sm font-medium press",
+                    isActive
+                      ? "bg-primary-50 text-primary-700"
+                      : "text-ink-muted hover:bg-bg-subtle hover:text-ink",
+                  )
+                }
+              >
+                <item.icon className="w-5 h-5 flex-shrink-0" />
+                <span>{item.label}</span>
+              </NavLink>
+            ))}
+          </>
+        )}
       </nav>
 
       {/* User block — bottom */}
