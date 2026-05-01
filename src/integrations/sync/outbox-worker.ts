@@ -194,6 +194,17 @@ class OutboxWorker {
         if (error) throw new Error(error.message);
         return;
       }
+      case "goods_receipt.create": {
+        // Phase 2A: gọi RPC create_goods_receipt (idempotent qua receipt.id).
+        // RPC tăng stock + overwrite price_buy lần đầu; retry skip cả 2.
+        const p = job.payload as { receipt: object; items: object[] };
+        const { error } = await supabase.rpc("create_goods_receipt", {
+          p_receipt: p.receipt,
+          p_items: p.items,
+        });
+        if (error) throw new Error(error.message);
+        return;
+      }
       default:
         // Sprint 4+ thêm: invoice.issue, zns.send, ...
         throw new Error(`Unknown job type: ${job.type}`);

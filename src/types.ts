@@ -69,3 +69,58 @@ export interface OrderItem {
 }
 
 export type Role = "cashier" | "owner";
+
+/**
+ * Phiếu nhập kho (goods receipt) — header.
+ * Items lưu ở table riêng `goodsReceiptItems` (Dexie v5).
+ */
+export interface GoodsReceipt {
+  id: string;
+  orgId: string;
+  receiverId?: string; // user nhập (auth.users.id)
+  supplierName?: string;
+  supplierPhone?: string;
+  supplierTaxCode?: string;
+  receiptDate: string; // YYYY-MM-DD (date type Postgres)
+  invoiceNo?: string;
+  totalCost: number; // tổng tiền nhập (đồng)
+  notes?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface GoodsReceiptItem {
+  id: string;
+  receiptId: string;
+  productId?: string;
+  productName: string;
+  unit: string;
+  quantity: number;
+  priceBuy: number; // giá nhập đơn vị (đồng)
+  lineTotal: number; // priceBuy * quantity
+}
+
+/**
+ * Input cho UI form Nhập kho — chưa có id/timestamps/totalCost (auto-calc).
+ */
+export interface ReceiveInput {
+  supplierName?: string;
+  supplierPhone?: string;
+  supplierTaxCode?: string;
+  receiptDate: string; // YYYY-MM-DD
+  invoiceNo?: string;
+  notes?: string;
+}
+
+/**
+ * Item trong UI form trước khi gửi: giữ snapshot tên + đơn vị + currentStock
+ * (để hiển thị "Tồn cũ X → +Y = Z"). currentStock không được sync lên Supabase.
+ */
+export interface ReceiveItemInput {
+  productId: string;
+  productName: string;
+  unit: string;
+  quantity: number;
+  priceBuy: number;
+  currentStock: number; // chỉ dùng UI hiển thị, không gửi server
+}

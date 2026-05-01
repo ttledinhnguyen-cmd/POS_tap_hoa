@@ -3,6 +3,7 @@ import {
   BarChart3,
   type LucideIcon,
   Package,
+  Package2,
   Receipt,
   ScanLine,
   Settings,
@@ -21,6 +22,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { to: "/", icon: ScanLine, label: "Bán hàng", end: true },
   { to: "/products", icon: Package, label: "Sản phẩm" },
+  { to: "/inventory/receive", icon: Package2, label: "Kho hàng" },
   { to: "/reports", icon: BarChart3, label: "Báo cáo" },
   { to: "/orders", icon: Receipt, label: "Lịch sử" },
   { to: "/settings", icon: Settings, label: "Cài đặt" },

@@ -1,5 +1,11 @@
 import Dexie, { type EntityTable } from "dexie";
-import type { Order, OrderItem, Product } from "@/types";
+import type {
+  GoodsReceipt,
+  GoodsReceiptItem,
+  Order,
+  OrderItem,
+  Product,
+} from "@/types";
 import type { OutboxJob } from "@/integrations/shared/queue";
 
 /**
@@ -23,6 +29,8 @@ export class POSDatabase extends Dexie {
   products!: EntityTable<Product, "id">;
   orders!: EntityTable<Order, "id">;
   orderItems!: EntityTable<OrderItem, "id">;
+  goodsReceipts!: EntityTable<GoodsReceipt, "id">;
+  goodsReceiptItems!: EntityTable<GoodsReceiptItem, "id">;
   outbox!: EntityTable<OutboxJob, "id">;
 
   constructor() {
@@ -81,6 +89,17 @@ export class POSDatabase extends Dexie {
             if (legacy.items !== undefined) delete legacy.items;
           });
       });
+    // v5: thêm goodsReceipts + goodsReceiptItems (Phase 2A nhập kho).
+    // Tables mới — không cần migrate dữ liệu cũ.
+    this.version(5).stores({
+      products:
+        "id, orgId, barcode, [orgId+barcode], [orgId+isActive], name, category, updatedAt",
+      orders: "id, orgId, [orgId+createdAt], invoiceStatus, updatedAt",
+      orderItems: "id, orderId, productId, [orderId+productId]",
+      goodsReceipts: "id, orgId, [orgId+receiptDate], receiptDate, updatedAt",
+      goodsReceiptItems: "id, receiptId, productId, [receiptId+productId]",
+      outbox: "id, type, status, nextRunAt, createdAt",
+    });
   }
 }
 

@@ -1,6 +1,16 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import {
+  CheckCircle2,
+  ChevronDown,
+  Package2,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  Upload,
+} from "lucide-react";
 import { db } from "@/lib/db";
 import { useAuthStore, useCurrentRole } from "@/stores/auth";
 import { Button } from "@/components/ui/Button";
@@ -35,12 +45,27 @@ export function ProductsPage() {
   const orgId = useAuthStore((s) => s.currentOrgId);
   const role = useCurrentRole();
   const isOwner = role === "owner";
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   const [query, setQuery] = useState("");
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [deleting, setDeleting] = useState<Product | null>(null);
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [showActionsMenu, setShowActionsMenu] = useState(false);
+
+  // Banner "Đã nhập kho thành công" sau redirect từ /inventory/receive
+  const justReceived = searchParams.get("received") === "1";
+  useEffect(() => {
+    if (!justReceived) return;
+    const t = window.setTimeout(() => {
+      const next = new URLSearchParams(searchParams);
+      next.delete("received");
+      setSearchParams(next, { replace: true });
+    }, 4000);
+    return () => window.clearTimeout(t);
+  }, [justReceived, searchParams, setSearchParams]);
 
   // Live query Dexie products active của org hiện tại, sort name
   const products = useLiveQuery(
@@ -77,9 +102,17 @@ export function ProductsPage() {
             {products.length} mặt hàng đang bán
           </p>
         </div>
-        {/* Action buttons — desktop. Mobile dùng FAB ở dưới + import qua menu Settings/Cài đặt sau. */}
+        {/* Action buttons — desktop inline 3 buttons / mobile dropdown menu */}
         <RoleGate allow={["owner"]}>
+          {/* Desktop: 3 inline buttons */}
           <div className="hidden md:flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => navigate("/inventory/receive")}
+            >
+              <Package2 className="w-5 h-5" />
+              Nhập kho
+            </Button>
             <Button
               variant="outline"
               onClick={() => setShowBulkImport(true)}
@@ -92,8 +125,80 @@ export function ProductsPage() {
               Thêm sản phẩm
             </Button>
           </div>
+          {/* Mobile: dropdown menu — chật chỗ với 3 buttons */}
+          <div className="md:hidden relative">
+            <Button
+              variant="outline"
+              onClick={() => setShowActionsMenu((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={showActionsMenu}
+            >
+              Quản lý kho
+              <ChevronDown className="w-4 h-4" />
+            </Button>
+            {showActionsMenu && (
+              <>
+                {/* Backdrop tap-to-close */}
+                <button
+                  type="button"
+                  aria-hidden="true"
+                  onClick={() => setShowActionsMenu(false)}
+                  className="fixed inset-0 z-30"
+                />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-[calc(100%+4px)] z-40 min-w-[200px] bg-bg-card border border-line rounded-lg shadow-soft py-1"
+                >
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowActionsMenu(false);
+                      navigate("/inventory/receive");
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-bg-subtle press"
+                  >
+                    <Package2 className="w-4 h-4 text-ink-muted" />
+                    Nhập kho
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowActionsMenu(false);
+                      setShowBulkImport(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-bg-subtle press"
+                  >
+                    <Upload className="w-4 h-4 text-ink-muted" />
+                    Nhập từ Excel
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowActionsMenu(false);
+                      setShowAdd(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-bg-subtle press"
+                  >
+                    <Plus className="w-4 h-4 text-ink-muted" />
+                    Thêm sản phẩm
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </RoleGate>
       </div>
+
+      {/* Banner sau khi nhập kho */}
+      {justReceived && (
+        <div className="px-4 md:px-6 py-2 bg-primary-50 border-b border-primary-100 flex items-center gap-2 text-sm text-primary-800">
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          <span>Đã nhập kho thành công. Tồn kho đã được cập nhật.</span>
+        </div>
+      )}
 
       {/* Search */}
       <div className="px-4 md:px-6 py-3 border-b border-line bg-bg">

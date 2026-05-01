@@ -37,6 +37,18 @@ interface Props {
    * Khi truyền product → form ở chế độ Edit. Khi null → Add.
    */
   product: Product | null;
+  /**
+   * Phase 2A: callback gọi sau khi save thành công + Dexie đã có row mới.
+   * Dùng từ InventoryReceivePage: user thêm sản phẩm mới giữa flow nhập kho
+   * → callback nhận product mới → page tự add vào receive list.
+   * Optional — không truyền thì hành vi cũ (chỉ đóng modal).
+   */
+  onProductAdded?: (product: Product) => void;
+  /**
+   * Phase 2A: prefill barcode khi mở modal Add (vd. từ scanner trong receive flow).
+   * Bỏ qua trong Edit mode.
+   */
+  initialBarcode?: string;
 }
 
 const TAX_OPTIONS = [
@@ -49,7 +61,13 @@ const TAX_OPTIONS = [
 /**
  * ProductFormModal — Add/Edit. RoleGate ẩn `priceCost` cho cashier.
  */
-export function ProductFormModal({ open, onClose, product }: Props) {
+export function ProductFormModal({
+  open,
+  onClose,
+  product,
+  onProductAdded,
+  initialBarcode,
+}: Props) {
   const orgId = useAuthStore((s) => s.currentOrgId);
   const isEdit = product !== null;
 
@@ -79,7 +97,8 @@ export function ProductFormModal({ open, onClose, product }: Props) {
       setTaxRate(product.taxRate);
       setCategory(product.category ?? "");
     } else {
-      setBarcode("");
+      // Phase 2A: prefill barcode khi mở từ receive flow scanner
+      setBarcode(initialBarcode ?? "");
       setName("");
       setUnit("cái");
       setPriceSell("");
@@ -89,7 +108,7 @@ export function ProductFormModal({ open, onClose, product }: Props) {
       setCategory("");
     }
     setErrors({});
-  }, [open, product]);
+  }, [open, product, initialBarcode]);
 
   // Check trùng barcode (chỉ khi Add hoặc Edit + đổi barcode)
   const duplicateBarcode = useLiveQuery(
@@ -126,7 +145,7 @@ export function ProductFormModal({ open, onClose, product }: Props) {
 
     setSubmitting(true);
     try {
-      await productsSync.upsertProduct(orgId, {
+      const id = await productsSync.upsertProduct(orgId, {
         id: product?.id,
         barcode: barcode.trim(),
         name: name.trim(),
@@ -140,6 +159,11 @@ export function ProductFormModal({ open, onClose, product }: Props) {
       // Trigger drain ngay (UX feedback nhanh)
       outboxWorker.drainNow();
       vibrate(15);
+      // Phase 2A: callback cho receive flow — đọc Dexie row vừa save
+      if (onProductAdded && !isEdit) {
+        const fresh = await db.products.get(id);
+        if (fresh) onProductAdded(fresh);
+      }
       onClose();
     } catch (err) {
       setErrors({
