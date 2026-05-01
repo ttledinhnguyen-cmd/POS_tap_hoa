@@ -1,6 +1,7 @@
-import { X } from "lucide-react";
+import { CheckCircle2, TriangleAlert, X } from "lucide-react";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { COST_VARIANCE_THRESHOLD } from "@/integrations/sync/inventory-sync";
 import type { ReceiveItemInput } from "@/types";
 
 interface Props {
@@ -10,6 +11,11 @@ interface Props {
   onRemove: () => void;
   /** True khi vừa thêm — quantity input auto-focus */
   autoFocus?: boolean;
+  /**
+   * Cost variance từ getCostVariance(productId). Null = chưa đủ history.
+   * Component tự so sánh với priceBuy hiện tại để hiển thị badge.
+   */
+  costVariance?: { avgRecent: number; lastPrice: number } | null;
 }
 
 const QUICK_QTY = [1, 5, 10, 12, 24, 30];
@@ -26,9 +32,28 @@ export function ReceiveItemRow({
   onChangePriceBuy,
   onRemove,
   autoFocus,
+  costVariance,
 }: Props) {
   const newTotal = item.currentStock + item.quantity;
   const lineTotal = Math.round(item.priceBuy * item.quantity);
+
+  // Cost variance: so sánh giá user đang nhập với trung bình 5 lần trước
+  // (badge update real-time khi user gõ priceBuy)
+  let varianceBadge: { kind: "high" | "low"; message: string } | null = null;
+  if (costVariance && costVariance.avgRecent > 0 && item.priceBuy > 0) {
+    const ratio = (item.priceBuy - costVariance.avgRecent) / costVariance.avgRecent;
+    if (ratio > COST_VARIANCE_THRESHOLD) {
+      varianceBadge = {
+        kind: "high",
+        message: `Giá nhập cao hơn ${Math.round(ratio * 100)}% so với 5 lần trước (TB: ${formatVND(costVariance.avgRecent)}đ)`,
+      };
+    } else if (ratio < -COST_VARIANCE_THRESHOLD) {
+      varianceBadge = {
+        kind: "low",
+        message: `Giá nhập thấp hơn ${Math.round(Math.abs(ratio) * 100)}% so với 5 lần trước (TB: ${formatVND(costVariance.avgRecent)}đ)`,
+      };
+    }
+  }
 
   return (
     <div className="bg-bg-card border border-line rounded-lg p-3 flex flex-col gap-2.5">
@@ -105,6 +130,26 @@ export function ReceiveItemRow({
           </button>
         ))}
       </div>
+
+      {/* Cost variance badge */}
+      {varianceBadge && (
+        <div
+          className={cn(
+            "flex items-start gap-1.5 rounded-md px-2 py-1.5 text-[11px] leading-tight",
+            varianceBadge.kind === "high"
+              ? "bg-danger-bg text-danger"
+              : "bg-primary-50 text-primary-800",
+          )}
+          role="status"
+        >
+          {varianceBadge.kind === "high" ? (
+            <TriangleAlert className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          ) : (
+            <CheckCircle2 className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+          )}
+          <span>{varianceBadge.message}</span>
+        </div>
+      )}
 
       {/* Line total */}
       <div className="flex justify-end items-baseline gap-1 pt-1 border-t border-line/50">

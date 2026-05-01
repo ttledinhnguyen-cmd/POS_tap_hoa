@@ -50,6 +50,9 @@ const InventoryReceivePage = lazy(() =>
     default: m.InventoryReceivePage,
   })),
 );
+const InventoryPage = lazy(() =>
+  import("@/pages/InventoryPage").then((m) => ({ default: m.InventoryPage })),
+);
 
 const VISIBILITY_PULL_THROTTLE_MS = 30_000;
 let lastVisiblePull = 0;
@@ -159,6 +162,16 @@ export default function App() {
               <AuthGuard>
                 <AppLayout>
                   <SettingsPage />
+                </AppLayout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/inventory"
+            element={
+              <AuthGuard>
+                <AppLayout>
+                  <InventoryPage />
                 </AppLayout>
               </AuthGuard>
             }

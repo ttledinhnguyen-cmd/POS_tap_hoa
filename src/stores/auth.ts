@@ -7,6 +7,7 @@ import { authErrorMessage } from "@/integrations/auth";
 import type { Role } from "@/integrations/auth";
 import { productsSync } from "@/integrations/sync/products-sync";
 import { ordersSync } from "@/integrations/sync/orders-sync";
+import { inventorySync } from "@/integrations/sync/inventory-sync";
 import { seedIfEmptyForOrg } from "@/lib/seed";
 
 /**
@@ -78,13 +79,15 @@ interface AuthState {
 async function syncForOrg(orgId: string): Promise<void> {
   if (!orgId) return;
   try {
-    // Pull data + subscribe realtime cho cả products và orders
+    // Pull data + subscribe realtime cho products / orders / goods_receipts
     await Promise.all([
       productsSync.pullProductsIfNeeded(orgId),
       ordersSync.pullOrdersIfNeeded(orgId),
+      inventorySync.pullReceiptsIfNeeded(orgId),
     ]);
     productsSync.subscribeRealtime(orgId);
     ordersSync.subscribeRealtime(orgId);
+    inventorySync.subscribeRealtime(orgId);
     // Dev seed (chỉ DEV + orgId rỗng products): seedIfEmptyForOrg tự kiểm tra
     await seedIfEmptyForOrg(orgId);
   } catch (err) {
@@ -163,6 +166,7 @@ export const useAuthStore = create<AuthState>()(
             setTimeout(() => {
               productsSync.unsubscribeAndReset();
               ordersSync.unsubscribeAndReset();
+              inventorySync.unsubscribeAndReset();
             }, 0);
             return;
           }

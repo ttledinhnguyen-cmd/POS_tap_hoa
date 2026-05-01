@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Camera, Loader2, Package, Search } from "lucide-react";
 import { db } from "@/lib/db";
@@ -59,6 +59,30 @@ export function InventoryReceivePage() {
   // Items list
   const [items, setItems] = useState<ReceiveItemInput[]>([]);
   const [lastAddedId, setLastAddedId] = useState<string | null>(null);
+  // Cost variance cache: productId → result. Tải 1 lần khi product được add.
+  const [variances, setVariances] = useState<
+    Map<string, { avgRecent: number; lastPrice: number } | null>
+  >(new Map());
+
+  // Load cost variance khi item mới thêm vào list (chưa có cache)
+  useEffect(() => {
+    items.forEach((it) => {
+      if (variances.has(it.productId)) return;
+      inventorySync
+        .getCostVariance(it.productId)
+        .then((cv) => {
+          setVariances((prev) => {
+            if (prev.has(it.productId)) return prev;
+            const next = new Map(prev);
+            next.set(it.productId, cv);
+            return next;
+          });
+        })
+        .catch(() => {
+          /* ignore — variance là nice-to-have */
+        });
+    });
+  }, [items, variances]);
 
   // Modals
   const [showScanner, setShowScanner] = useState(false);
@@ -309,6 +333,7 @@ export function InventoryReceivePage() {
                   onChangePriceBuy={(price) => updatePrice(it.productId, price)}
                   onRemove={() => removeItem(it.productId)}
                   autoFocus={lastAddedId === it.productId}
+                  costVariance={variances.get(it.productId) ?? null}
                 />
               ))}
             </div>
