@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useLiveQuery } from "dexie-react-hooks";
-import { Pencil, Plus, Search, Trash2 } from "lucide-react";
+import { Pencil, Plus, Search, Trash2, Upload } from "lucide-react";
 import { db } from "@/lib/db";
 import { useAuthStore, useCurrentRole } from "@/stores/auth";
 import { Button } from "@/components/ui/Button";
@@ -10,6 +10,14 @@ import { ProductDeleteConfirm } from "@/components/products/ProductDeleteConfirm
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types";
+
+// Lazy: BulkImportSheet kéo theo SheetJS (~100 KB gzip).
+// Chỉ load khi owner click "Nhập từ Excel" — initial bundle không bị bloat.
+const BulkImportSheet = lazy(() =>
+  import("@/components/products/BulkImportSheet").then((m) => ({
+    default: m.BulkImportSheet,
+  })),
+);
 
 /**
  * Bỏ dấu tiếng Việt + lowercase để search lenient.
@@ -32,6 +40,7 @@ export function ProductsPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [editing, setEditing] = useState<Product | null>(null);
   const [deleting, setDeleting] = useState<Product | null>(null);
+  const [showBulkImport, setShowBulkImport] = useState(false);
 
   // Live query Dexie products active của org hiện tại, sort name
   const products = useLiveQuery(
@@ -68,16 +77,21 @@ export function ProductsPage() {
             {products.length} mặt hàng đang bán
           </p>
         </div>
-        {/* Add button — desktop. Mobile dùng FAB ở dưới. */}
+        {/* Action buttons — desktop. Mobile dùng FAB ở dưới + import qua menu Settings/Cài đặt sau. */}
         <RoleGate allow={["owner"]}>
-          <Button
-            variant="primary"
-            onClick={() => setShowAdd(true)}
-            className="hidden md:inline-flex"
-          >
-            <Plus className="w-5 h-5" />
-            Thêm sản phẩm
-          </Button>
+          <div className="hidden md:flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowBulkImport(true)}
+            >
+              <Upload className="w-5 h-5" />
+              Nhập từ Excel
+            </Button>
+            <Button variant="primary" onClick={() => setShowAdd(true)}>
+              <Plus className="w-5 h-5" />
+              Thêm sản phẩm
+            </Button>
+          </div>
         </RoleGate>
       </div>
 
@@ -148,6 +162,15 @@ export function ProductsPage() {
         onClose={() => setDeleting(null)}
         product={deleting}
       />
+      {/* Bulk import — lazy chunk: SheetJS ~100KB gzip chỉ load khi mở */}
+      {showBulkImport && (
+        <Suspense fallback={null}>
+          <BulkImportSheet
+            open={showBulkImport}
+            onClose={() => setShowBulkImport(false)}
+          />
+        </Suspense>
+      )}
     </div>
   );
 }
