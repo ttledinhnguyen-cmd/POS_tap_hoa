@@ -54,6 +54,16 @@ const InventoryReceivePage = lazy(() =>
 const InventoryPage = lazy(() =>
   import("@/pages/InventoryPage").then((m) => ({ default: m.InventoryPage })),
 );
+const StockTakeNewPage = lazy(() =>
+  import("@/pages/inventory/StockTakeNewPage").then((m) => ({
+    default: m.StockTakeNewPage,
+  })),
+);
+const StockTakeDetailPage = lazy(() =>
+  import("@/pages/inventory/StockTakeDetailPage").then((m) => ({
+    default: m.StockTakeDetailPage,
+  })),
+);
 const SubscriptionExpiredPage = lazy(() =>
   import("@/pages/SubscriptionExpiredPage").then((m) => ({
     default: m.SubscriptionExpiredPage,
@@ -216,6 +226,26 @@ export default function App() {
               <AuthGuard>
                 <AppLayout>
                   <InventoryReceivePage />
+                </AppLayout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/inventory/stock-take/new"
+            element={
+              <AuthGuard>
+                <AppLayout>
+                  <StockTakeNewPage />
+                </AppLayout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/inventory/stock-take/:id"
+            element={
+              <AuthGuard>
+                <AppLayout>
+                  <StockTakeDetailPage />
                 </AppLayout>
               </AuthGuard>
             }

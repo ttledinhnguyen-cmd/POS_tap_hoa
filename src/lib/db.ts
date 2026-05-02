@@ -5,6 +5,8 @@ import type {
   Order,
   OrderItem,
   Product,
+  StockTake,
+  StockTakeItem,
 } from "@/types";
 import type { OutboxJob } from "@/integrations/shared/queue";
 
@@ -31,6 +33,8 @@ export class POSDatabase extends Dexie {
   orderItems!: EntityTable<OrderItem, "id">;
   goodsReceipts!: EntityTable<GoodsReceipt, "id">;
   goodsReceiptItems!: EntityTable<GoodsReceiptItem, "id">;
+  stockTakes!: EntityTable<StockTake, "id">;
+  stockTakeItems!: EntityTable<StockTakeItem, "id">;
   outbox!: EntityTable<OutboxJob, "id">;
 
   constructor() {
@@ -98,6 +102,18 @@ export class POSDatabase extends Dexie {
       orderItems: "id, orderId, productId, [orderId+productId]",
       goodsReceipts: "id, orgId, [orgId+receiptDate], receiptDate, updatedAt",
       goodsReceiptItems: "id, receiptId, productId, [receiptId+productId]",
+      outbox: "id, type, status, nextRunAt, createdAt",
+    });
+    // v6: stockTakes + stockTakeItems (Sprint Stock Take).
+    this.version(6).stores({
+      products:
+        "id, orgId, barcode, [orgId+barcode], [orgId+isActive], name, category, updatedAt",
+      orders: "id, orgId, [orgId+createdAt], invoiceStatus, updatedAt",
+      orderItems: "id, orderId, productId, [orderId+productId]",
+      goodsReceipts: "id, orgId, [orgId+receiptDate], receiptDate, updatedAt",
+      goodsReceiptItems: "id, receiptId, productId, [receiptId+productId]",
+      stockTakes: "id, orgId, [orgId+takeDate], takeDate, status, updatedAt",
+      stockTakeItems: "id, stockTakeId, productId, [stockTakeId+productId]",
       outbox: "id, type, status, nextRunAt, createdAt",
     });
   }

@@ -184,6 +184,47 @@ export interface ShopWithStats {
   created_at: string;
 }
 
+// =============================================================================
+// Stock Take (kiểm kê)
+// =============================================================================
+
+export type StockTakeStatus = "in_progress" | "committed" | "cancelled";
+export type StockTakeReason =
+  | "shrinkage"
+  | "damaged"
+  | "expired"
+  | "found"
+  | "count_error"
+  | "other";
+
+export interface StockTake {
+  id: string;
+  orgId: string;
+  takerId?: string;
+  takeDate: string; // YYYY-MM-DD
+  status: StockTakeStatus;
+  notes?: string;
+  totalDeltaValue: number;
+  totalItemsCount: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StockTakeItem {
+  id: string;
+  stockTakeId: string;
+  productId?: string;
+  productName: string;
+  unit: string;
+  expectedStock: number;
+  actualCount: number;
+  delta: number;
+  reason?: StockTakeReason;
+  unitCost: number;
+  deltaValue: number;
+  createdAt: number;
+}
+
 /**
  * Shape return từ admin_dashboard_metrics RPC.
  */
