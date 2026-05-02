@@ -15,6 +15,7 @@ interface CreateResponse {
   org_id: string;
   owner_user_id: string;
   invite_sent: boolean;
+  warning?: string;
   message?: string;
   error?: string;
 }
@@ -65,9 +66,30 @@ export function AdminShopNewPage() {
           monthly_price: monthlyPrice,
         },
       });
-      if (invokeErr) throw invokeErr;
+      // FunctionsHttpError giữ generic message ("non-2xx") — đọc body từ
+      // context.response để extract error JSON edge function trả về.
+      if (invokeErr) {
+        let detail = invokeErr.message;
+        // FunctionsHttpError.context giữ raw Response — đọc body để lấy
+        // error JSON edge function trả về (tránh generic "non-2xx" message)
+        const ctx = (invokeErr as unknown as { context?: Response }).context;
+        if (ctx && typeof ctx.clone === "function") {
+          try {
+            const body = await ctx.clone().json();
+            if (body?.error) detail = body.error;
+          } catch {
+            // ignore parse fail
+          }
+        }
+        throw new Error(detail);
+      }
       if (!data || data.error) {
         throw new Error(data?.error ?? "Tạo shop thất bại");
+      }
+      // Nếu có warning (vd. invite không gửi được nhưng owner đã tạo) → vẫn
+      // navigate sang shop detail nhưng alert ngắn cho admin biết
+      if (data.warning) {
+        alert(`Tạo shop OK. Lưu ý: ${data.warning}`);
       }
       navigate(`/admin/shops/${data.org_id}`, { replace: true });
     } catch (err) {
