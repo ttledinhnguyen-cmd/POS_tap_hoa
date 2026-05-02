@@ -190,48 +190,50 @@ export function BarcodeScanner({
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
-      {/* Top bar — white background, stats trái + 2 buttons (Giỏ hàng + X) phải */}
-      <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between gap-2 px-4 py-3 safe-top bg-bg-card shadow-soft">
-        <div className="flex flex-col leading-tight min-w-0 flex-1">
-          {summary && summary.count > 0 ? (
-            <>
-              <span className="text-xs text-ink-muted">Đã quét</span>
-              <span className="text-base font-semibold tabular-nums font-mono text-ink truncate">
-                {summary.count} món ·{" "}
-                <span className="text-primary-700">
-                  {formatVND(summary.total)}đ
+      {/* Top bar — white card style, mx-3 mt-3 dưới safe-top notch */}
+      <div className="absolute top-0 inset-x-0 z-10 safe-top">
+        <div className="mx-3 mt-3 flex items-center justify-between gap-2 px-5 py-4 bg-bg-card rounded-xl shadow-soft">
+          <div className="flex flex-col leading-tight min-w-0 flex-1">
+            {summary && summary.count > 0 ? (
+              <>
+                <span className="text-sm text-ink-muted">Đã quét</span>
+                <span className="text-lg font-semibold tabular-nums font-mono text-ink truncate">
+                  {summary.count} món ·{" "}
+                  <span className="text-primary-700">
+                    {formatVND(summary.total)}đ
+                  </span>
                 </span>
-              </span>
-            </>
-          ) : (
-            <div className="flex items-center gap-2 text-ink">
-              <Camera className="w-5 h-5 text-primary-700" />
-              <span className="text-sm font-medium">
-                {scanning ? "Đang quét…" : "Chuẩn bị camera"}
-              </span>
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {onOpenCart && (
+              </>
+            ) : (
+              <div className="flex items-center gap-2 text-ink">
+                <Camera className="w-5 h-5 text-primary-700" />
+                <span className="text-base font-medium">
+                  {scanning ? "Đang quét…" : "Chuẩn bị camera"}
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-2 flex-shrink-0">
+            {onOpenCart && (
+              <button
+                type="button"
+                onClick={onOpenCart}
+                aria-label="Mở giỏ hàng"
+                className="flex items-center gap-1.5 px-4 h-11 rounded-lg bg-primary-700 text-white press text-sm font-medium"
+              >
+                <ShoppingBag className="w-5 h-5" />
+                Giỏ hàng
+              </button>
+            )}
             <button
               type="button"
-              onClick={onOpenCart}
-              aria-label="Mở giỏ hàng"
-              className="flex items-center gap-1.5 px-3 py-2 h-10 rounded-lg bg-primary-700 text-white press text-sm font-medium"
+              onClick={onClose}
+              aria-label="Đóng"
+              className="w-11 h-11 flex items-center justify-center rounded-lg bg-danger text-white press"
             >
-              <ShoppingBag className="w-4 h-4" />
-              Giỏ hàng
+              <X className="w-[22px] h-[22px]" />
             </button>
-          )}
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Đóng"
-            className="w-10 h-10 flex items-center justify-center rounded-lg bg-danger text-white press"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          </div>
         </div>
       </div>
 
