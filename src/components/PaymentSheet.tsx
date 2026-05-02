@@ -29,10 +29,17 @@ export function PaymentSheet({ onDone }: Props) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string>();
 
-  const cash = parseVND(cashInput);
-  const change = method === "cash" && cash >= total ? cash - total : 0;
-  const canConfirm =
-    !submitting && (method !== "cash" || cash >= total) && items.length > 0;
+  // "Khách đưa" giờ optional — rỗng = assume cash đủ total, không thối.
+  // Ý nghĩa: nhập field này CHỈ để tính tiền thối, không phải để gate confirm.
+  const cashRaw = parseVND(cashInput);
+  const cashEffective = cashInput.trim() === "" ? total : cashRaw;
+  const change = method === "cash" && cashEffective > total ? cashEffective - total : 0;
+  const cashShortBy =
+    method === "cash" && cashInput.trim() !== "" && cashRaw < total
+      ? total - cashRaw
+      : 0;
+  // Confirm allowed bất cứ khi nào cart có items + total > 0 (không gate by cash)
+  const canConfirm = !submitting && total > 0 && items.length > 0;
 
   const handleConfirm = async () => {
     if (!orgId || items.length === 0) return;
@@ -43,7 +50,7 @@ export function PaymentSheet({ onDone }: Props) {
       await ordersSync.createOrder({
         orgId,
         paymentMethod: method,
-        cashReceived: method === "cash" ? cash : undefined,
+        cashReceived: method === "cash" ? cashEffective : undefined,
         changeAmount: method === "cash" ? change : undefined,
         subtotal: total - taxAmount,
         taxAmount,
@@ -138,23 +145,36 @@ export function PaymentSheet({ onDone }: Props) {
           <input
             type="text"
             inputMode="numeric"
-            value={cashInput ? formatVND(cash) : ""}
+            value={cashInput ? formatVND(cashRaw) : ""}
             onChange={(e) => setCashInput(e.target.value)}
-            placeholder="0"
+            placeholder="0 (để trống = đủ)"
             className="w-full mt-1 h-touch-lg px-4 rounded-lg border border-line bg-bg-card text-money font-mono tabular-nums focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20"
           />
           <div className="flex gap-2 mt-2 flex-wrap">
             {quickAmounts.map((amt) => (
               <button
                 key={amt}
+                type="button"
                 onClick={() => setCashInput(formatVND(amt))}
                 className="px-3 py-1.5 text-sm font-mono rounded-full bg-bg-subtle hover:bg-line press"
               >
                 {formatVND(amt)}
               </button>
             ))}
+            {/* "000" — APPEND 3 chữ số 0 (×1000) vào số hiện tại */}
+            <button
+              type="button"
+              onClick={() => {
+                if (cashRaw === 0) return;
+                setCashInput(formatVND(cashRaw * 1000));
+              }}
+              aria-label="Nhân với 1000"
+              className="px-3 py-1.5 text-sm font-mono font-semibold rounded-full bg-bg-subtle hover:bg-line press"
+            >
+              000
+            </button>
           </div>
-          {cash >= total && change > 0 && (
+          {change > 0 && (
             <div className="mt-3 p-3 rounded-lg bg-accent/10 border border-accent/20">
               <p className="text-sm text-ink-muted">Thối lại</p>
               <p className="text-money font-mono tabular-nums text-accent">
@@ -162,9 +182,11 @@ export function PaymentSheet({ onDone }: Props) {
               </p>
             </div>
           )}
-          {cashInput && cash < total && (
-            <p className="mt-2 text-sm text-danger">
-              Còn thiếu {formatVND(total - cash)}đ
+          {cashShortBy > 0 && (
+            <p className="mt-2 text-xs text-ink-muted">
+              Khách đưa thiếu{" "}
+              <span className="font-mono">{formatVND(cashShortBy)}đ</span>{" "}
+              (vẫn xác nhận thanh toán)
             </p>
           )}
         </div>
