@@ -343,7 +343,7 @@ export function POSPage() {
         )}
       >
         <Button
-          variant="outline"
+          variant="primary"
           size="lg"
           onClick={() => {
             setScanFeedback(null);
