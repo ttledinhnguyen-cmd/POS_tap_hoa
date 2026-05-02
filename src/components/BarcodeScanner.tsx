@@ -1,9 +1,16 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
-import { Camera, X } from "lucide-react";
+import { Camera, CheckCircle2, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
+import { formatVND } from "@/lib/format";
 import { beep, vibrate } from "@/lib/utils";
+
+/**
+ * Cooldown between same-barcode scans (ms). Tránh detect duplicate khi giữ
+ * lâu trong frame. Khác barcode accept ngay.
+ */
+const SAME_BARCODE_COOLDOWN_MS = 800;
 
 /**
  * Format whitelist cho tạp hóa VN:
@@ -45,16 +52,73 @@ const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
   advanced: [{ focusMode: "continuous" }],
 };
 
+/**
+ * Toast feedback hiển thị giữa scanner sau mỗi scan (parent set qua prop).
+ * Bump `timestamp` để re-trigger animation cho cùng barcode scan lại.
+ */
+export interface ScanFeedback {
+  type: "success" | "error";
+  message: string;
+  sublabel?: string;
+  timestamp: number; // Date.now() khi parent set, dùng để watch + auto-fade
+}
+
 interface Props {
   onScan: (barcode: string) => void;
   onClose: () => void;
+  /**
+   * Optional toast feedback từ parent — hiển thị 1.5s rồi fade out.
+   * Parent set null/undefined để clear sớm.
+   */
+  feedback?: ScanFeedback | null;
+  /**
+   * Optional top overlay summary — count + total tiền đã quét.
+   * Parent truyền cart state để user thấy progress trong continuous scan mode.
+   */
+  summary?: {
+    count: number;
+    total: number;
+  };
+  /**
+   * Hint text cuối màn hình. Default "Đưa mã vạch vào khung — máy sẽ tự đọc".
+   */
+  bottomHint?: string;
 }
 
-export function BarcodeScanner({ onScan, onClose }: Props) {
+export function BarcodeScanner({
+  onScan,
+  onClose,
+  feedback,
+  summary,
+  bottomHint,
+}: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
+  // Local toast visibility — auto-fade sau 1.5s từ feedback.timestamp
+  const [toastVisible, setToastVisible] = useState(false);
+
+  // Cooldown refs (không trigger re-render)
+  const lastBarcodeRef = useRef<string | null>(null);
+  const lastScannedAtRef = useRef<number>(0);
+
+  // onScan ref để callback ZXing không re-bind mỗi render (giữ stable closure)
+  const onScanRef = useRef(onScan);
+  useEffect(() => {
+    onScanRef.current = onScan;
+  }, [onScan]);
+
+  // Auto-fade toast sau 1.5s mỗi khi feedback.timestamp đổi
+  useEffect(() => {
+    if (!feedback) {
+      setToastVisible(false);
+      return;
+    }
+    setToastVisible(true);
+    const t = setTimeout(() => setToastVisible(false), 1500);
+    return () => clearTimeout(t);
+  }, [feedback]);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,9 +142,20 @@ export function BarcodeScanner({ onScan, onClose }: Props) {
             if (cancelled) return;
             if (result) {
               const text = result.getText();
+              const now = Date.now();
+              // Cooldown: same barcode scan lại trong 800ms → skip (tránh
+              // duplicate khi giữ lâu trong frame). Barcode khác accept ngay.
+              if (
+                text === lastBarcodeRef.current &&
+                now - lastScannedAtRef.current < SAME_BARCODE_COOLDOWN_MS
+              ) {
+                return;
+              }
+              lastBarcodeRef.current = text;
+              lastScannedAtRef.current = now;
               beep(880, 80);
               vibrate(40);
-              onScan(text);
+              onScanRef.current(text);
             }
             // err xuất hiện liên tục khi không thấy mã — bỏ qua
             void err;
@@ -108,26 +183,71 @@ export function BarcodeScanner({ onScan, onClose }: Props) {
         videoRef.current.srcObject = null;
       }
     };
-  }, [onScan]);
+    // KHÔNG depend [onScan] — onScanRef giữ closure stable, tránh re-init reader
+  }, []);
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
-      {/* Top bar */}
-      <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between p-4 safe-top bg-gradient-to-b from-black/60 to-transparent">
-        <div className="flex items-center gap-2 text-white">
-          <Camera className="w-5 h-5" />
-          <span className="text-sm font-medium">
-            {scanning ? "Đang quét…" : "Chuẩn bị camera"}
-          </span>
+      {/* Top bar — summary nếu parent truyền, ngược lại "Đang quét" */}
+      <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between gap-2 p-4 safe-top bg-gradient-to-b from-black/70 to-transparent">
+        <div className="flex items-center gap-2 text-white min-w-0">
+          {summary && summary.count > 0 ? (
+            <div className="flex flex-col leading-tight">
+              <span className="text-xs text-white/70">Đã quét</span>
+              <span className="text-base font-semibold tabular-nums truncate">
+                {summary.count} món · {formatVND(summary.total)}đ
+              </span>
+            </div>
+          ) : (
+            <>
+              <Camera className="w-5 h-5" />
+              <span className="text-sm font-medium">
+                {scanning ? "Đang quét…" : "Chuẩn bị camera"}
+              </span>
+            </>
+          )}
         </div>
         <button
           onClick={onClose}
-          className="p-2 rounded-full bg-black/50 text-white press"
-          aria-label="Đóng"
+          className="px-3 py-2 rounded-full bg-black/60 text-white press flex items-center gap-1 text-sm font-medium flex-shrink-0"
+          aria-label="Xong"
         >
-          <X className="w-6 h-6" />
+          <X className="w-4 h-4" />
+          Xong
         </button>
       </div>
+
+      {/* Toast feedback — fade-in từ trên, ở giữa */}
+      {feedback && toastVisible && (
+        <div
+          key={feedback.timestamp}
+          className="absolute top-20 inset-x-0 z-20 flex justify-center px-4 pointer-events-none animate-in fade-in slide-in-from-top-2 duration-200"
+        >
+          <div
+            className={`flex items-start gap-2 max-w-sm px-3 py-2 rounded-lg shadow-lg ${
+              feedback.type === "success"
+                ? "bg-primary-700 text-white"
+                : "bg-danger text-white"
+            }`}
+          >
+            {feedback.type === "success" ? (
+              <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
+            ) : (
+              <XCircle className="w-5 h-5 flex-shrink-0" />
+            )}
+            <div className="flex flex-col leading-tight min-w-0">
+              <span className="text-sm font-semibold truncate">
+                {feedback.message}
+              </span>
+              {feedback.sublabel && (
+                <span className="text-xs text-white/80 truncate">
+                  {feedback.sublabel}
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Camera view */}
       <div className="flex-1 relative">
@@ -167,7 +287,10 @@ export function BarcodeScanner({ onScan, onClose }: Props) {
       {/* Bottom hint */}
       <div className="absolute bottom-0 inset-x-0 p-6 safe-bottom bg-gradient-to-t from-black/60 to-transparent">
         <p className="text-center text-white/80 text-sm">
-          Đưa mã vạch vào khung — máy sẽ tự đọc
+          {bottomHint ??
+            (summary
+              ? "Quét xong tự thêm vào giỏ — tap Xong khi xong"
+              : "Đưa mã vạch vào khung — máy sẽ tự đọc")}
         </p>
       </div>
     </div>

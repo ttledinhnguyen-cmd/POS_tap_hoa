@@ -17,8 +17,11 @@ interface Props {
 
 export function PaymentSheet({ onDone }: Props) {
   const items = useCart((s) => s.items);
-  const total = useCart((s) => s.total)();
-  const taxAmount = useCart((s) => s.taxAmount)();
+  // FIX: invoke selector INSIDE để Zustand subscribe vào primitive value, không
+  // phải function reference. Pattern (s) => s.total)() trả về function reference
+  // (stable) → Zustand thấy không đổi → KHÔNG re-render khi items thay đổi.
+  const total = useCart((s) => s.total());
+  const taxAmount = useCart((s) => s.taxAmount());
   const clear = useCart((s) => s.clear);
 
   const orgId = useAuthStore((s) => s.currentOrgId);
