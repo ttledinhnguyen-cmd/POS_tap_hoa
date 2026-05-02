@@ -59,6 +59,12 @@ const SubscriptionExpiredPage = lazy(() =>
     default: m.SubscriptionExpiredPage,
   })),
 );
+const TermsPage = lazy(() =>
+  import("@/pages/legal/LegalPage").then((m) => ({ default: m.TermsPage })),
+);
+const PrivacyPage = lazy(() =>
+  import("@/pages/legal/LegalPage").then((m) => ({ default: m.PrivacyPage })),
+);
 const AdminDashboardPage = lazy(() =>
   import("@/pages/admin/AdminDashboardPage").then((m) => ({
     default: m.AdminDashboardPage,
@@ -125,11 +131,13 @@ export default function App() {
     <BrowserRouter>
       <Suspense fallback={<PageLoader />}>
         <Routes>
-          {/* Public auth routes — không cần AuthGuard */}
+          {/* Public routes — không cần AuthGuard */}
           <Route path="/login" element={<LoginPage />} />
           <Route path="/signup" element={<SignupPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
+          <Route path="/terms" element={<TermsPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
 
           {/* Onboarding — cần auth nhưng KHÔNG cần membership */}
           <Route

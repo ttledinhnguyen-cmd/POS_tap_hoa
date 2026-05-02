@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
   Building2,
+  HelpCircle,
   LogOut,
   type LucideIcon,
   MoreHorizontal,
@@ -13,6 +14,8 @@ import {
   Settings,
   ShieldCheck,
 } from "lucide-react";
+
+const SUPPORT_ZALO = import.meta.env.VITE_SUPPORT_ZALO ?? "0901234567";
 import { useAuthStore } from "@/stores/auth";
 import { Sheet } from "@/components/ui/Sheet";
 import { cn } from "@/lib/utils";
@@ -173,6 +176,17 @@ export function BottomNav() {
           )}
 
           <div className="border-t border-line my-2" />
+
+          <a
+            href={`https://zalo.me/${SUPPORT_ZALO}`}
+            target="_blank"
+            rel="noreferrer"
+            onClick={() => setMoreOpen(false)}
+            className="flex items-center gap-3 px-3 py-3 rounded-lg min-h-[48px] press text-base text-ink hover:bg-bg-subtle"
+          >
+            <HelpCircle className="w-5 h-5 flex-shrink-0 text-ink-muted" />
+            <span className="font-medium">Liên hệ hỗ trợ</span>
+          </a>
 
           <button
             type="button"

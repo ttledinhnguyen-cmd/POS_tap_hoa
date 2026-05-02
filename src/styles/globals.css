@@ -40,4 +40,40 @@
   .press {
     @apply transition-transform active:scale-[0.97];
   }
+
+  /* Legal pages markdown styling — ToS + Privacy.
+     Tailwind không có @tailwindcss/typography mặc định; tự define small set. */
+  .prose-legal h1 {
+    @apply text-xl md:text-2xl font-bold mb-4 mt-2;
+  }
+  .prose-legal h2 {
+    @apply text-base md:text-lg font-semibold mt-6 mb-2;
+  }
+  .prose-legal h3 {
+    @apply text-sm font-semibold mt-4 mb-1;
+  }
+  .prose-legal p {
+    @apply text-sm leading-relaxed mb-3 text-ink;
+  }
+  .prose-legal ul {
+    @apply text-sm mb-3 space-y-1 pl-5 list-disc;
+  }
+  .prose-legal ol {
+    @apply text-sm mb-3 space-y-1 pl-5 list-decimal;
+  }
+  .prose-legal li {
+    @apply leading-relaxed;
+  }
+  .prose-legal strong {
+    @apply font-semibold text-ink;
+  }
+  .prose-legal a {
+    @apply text-primary-700 hover:underline;
+  }
+  .prose-legal hr {
+    @apply my-6 border-line;
+  }
+  .prose-legal code {
+    @apply bg-bg-subtle px-1 py-0.5 rounded text-xs font-mono;
+  }
 }

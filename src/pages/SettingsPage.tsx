@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   Building,
   Crown,
+  ExternalLink,
+  HelpCircle,
   KeyRound,
   Loader2,
   LogOut,
@@ -20,6 +23,12 @@ import { Button } from "@/components/ui/Button";
 import { OrgInfoForm } from "@/components/settings/OrgInfoForm";
 import { ChangePasswordSheet } from "@/components/settings/ChangePasswordSheet";
 import { cn } from "@/lib/utils";
+
+const SUPPORT_ZALO = import.meta.env.VITE_SUPPORT_ZALO ?? "0901234567";
+const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL ?? "support@example.com";
+const SUPPORT_BUSINESS_NAME =
+  import.meta.env.VITE_BUSINESS_NAME ?? "POS Tạp Hóa Co.";
+const APP_VERSION = import.meta.env.VITE_APP_VERSION ?? "0.1.0";
 
 interface Member {
   user_id: string;
@@ -177,6 +186,40 @@ export function SettingsPage() {
               <LogOut className="w-4 h-4" />
               {loggingOut ? "Đang đăng xuất..." : "Đăng xuất"}
             </Button>
+          </Section>
+
+          {/* E.7 Liên hệ hỗ trợ + ToS / Privacy + version */}
+          <Section icon={<HelpCircle className="w-5 h-5" />} title="Hỗ trợ & Pháp lý">
+            <div className="space-y-2 text-sm">
+              <p className="text-ink-muted">
+                {SUPPORT_BUSINESS_NAME} hỗ trợ qua Zalo và email
+              </p>
+              <a
+                href={`https://zalo.me/${SUPPORT_ZALO}`}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center gap-2 text-primary-700 hover:underline"
+              >
+                <span className="font-mono">{SUPPORT_ZALO}</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <a
+                href={`mailto:${SUPPORT_EMAIL}`}
+                className="flex items-center gap-2 text-primary-700 hover:underline"
+              >
+                <span>{SUPPORT_EMAIL}</span>
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+              <div className="pt-3 border-t border-line/60 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                <Link to="/terms" className="text-ink-muted hover:text-primary-700 hover:underline">
+                  Điều khoản dịch vụ
+                </Link>
+                <Link to="/privacy" className="text-ink-muted hover:text-primary-700 hover:underline">
+                  Chính sách bảo mật
+                </Link>
+                <span className="text-ink-subtle ml-auto">v{APP_VERSION}</span>
+              </div>
+            </div>
           </Section>
         </div>
       </div>

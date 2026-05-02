@@ -67,6 +67,17 @@ export function AuthLayout({ children, title, subtitle, footer }: Props) {
             {footer}
           </div>
         )}
+
+        {/* Legal links — luôn hiện cuối auth screens */}
+        <div className="text-center text-[11px] text-ink-subtle mt-6 flex justify-center gap-3">
+          <a href="/terms" className="hover:text-primary-700 hover:underline">
+            Điều khoản
+          </a>
+          <span>·</span>
+          <a href="/privacy" className="hover:text-primary-700 hover:underline">
+            Chính sách bảo mật
+          </a>
+        </div>
       </div>
     </div>
   );
