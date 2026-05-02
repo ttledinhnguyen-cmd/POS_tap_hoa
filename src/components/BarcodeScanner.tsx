@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 import { BarcodeFormat, DecodeHintType } from "@zxing/library";
-import { Camera, CheckCircle2, X, XCircle } from "lucide-react";
+import { Camera, CheckCircle2, ShoppingBag, X, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { formatVND } from "@/lib/format";
 import { beep, vibrate } from "@/lib/utils";
@@ -82,6 +82,11 @@ interface Props {
    * Hint text cuối màn hình. Default "Đưa mã vạch vào khung — máy sẽ tự đọc".
    */
   bottomHint?: string;
+  /**
+   * Tap "Giỏ hàng" trong top bar → callback. Parent thường đóng scanner +
+   * mở cart sheet. Nếu undefined → button không render.
+   */
+  onOpenCart?: () => void;
 }
 
 export function BarcodeScanner({
@@ -90,6 +95,7 @@ export function BarcodeScanner({
   feedback,
   summary,
   bottomHint,
+  onOpenCart,
 }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const readerRef = useRef<BrowserMultiFormatReader | null>(null);
@@ -184,33 +190,49 @@ export function BarcodeScanner({
 
   return (
     <div className="fixed inset-0 z-50 bg-black flex flex-col">
-      {/* Top bar — summary nếu parent truyền, ngược lại "Đang quét" */}
-      <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between gap-2 p-4 safe-top bg-gradient-to-b from-black/70 to-transparent">
-        <div className="flex items-center gap-2 text-white min-w-0">
+      {/* Top bar — white background, stats trái + 2 buttons (Giỏ hàng + X) phải */}
+      <div className="absolute top-0 inset-x-0 z-10 flex items-center justify-between gap-2 px-4 py-3 safe-top bg-bg-card shadow-soft">
+        <div className="flex flex-col leading-tight min-w-0 flex-1">
           {summary && summary.count > 0 ? (
-            <div className="flex flex-col leading-tight">
-              <span className="text-xs text-white/70">Đã quét</span>
-              <span className="text-base font-semibold tabular-nums truncate">
-                {summary.count} món · {formatVND(summary.total)}đ
-              </span>
-            </div>
-          ) : (
             <>
-              <Camera className="w-5 h-5" />
+              <span className="text-xs text-ink-muted">Đã quét</span>
+              <span className="text-base font-semibold tabular-nums font-mono text-ink truncate">
+                {summary.count} món ·{" "}
+                <span className="text-primary-700">
+                  {formatVND(summary.total)}đ
+                </span>
+              </span>
+            </>
+          ) : (
+            <div className="flex items-center gap-2 text-ink">
+              <Camera className="w-5 h-5 text-primary-700" />
               <span className="text-sm font-medium">
                 {scanning ? "Đang quét…" : "Chuẩn bị camera"}
               </span>
-            </>
+            </div>
           )}
         </div>
-        <button
-          onClick={onClose}
-          className="px-3 py-2 rounded-full bg-black/60 text-white press flex items-center gap-1 text-sm font-medium flex-shrink-0"
-          aria-label="Xong"
-        >
-          <X className="w-4 h-4" />
-          Xong
-        </button>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {onOpenCart && (
+            <button
+              type="button"
+              onClick={onOpenCart}
+              aria-label="Mở giỏ hàng"
+              className="flex items-center gap-1.5 px-3 py-2 h-10 rounded-lg bg-primary-700 text-white press text-sm font-medium"
+            >
+              <ShoppingBag className="w-4 h-4" />
+              Giỏ hàng
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Đóng"
+            className="w-10 h-10 flex items-center justify-center rounded-lg bg-danger text-white press"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
       </div>
 
       {/* Toast feedback — fade-in từ trên, ở giữa */}
@@ -280,12 +302,12 @@ export function BarcodeScanner({
         )}
       </div>
 
-      {/* Bottom hint */}
-      <div className="absolute bottom-0 inset-x-0 p-6 safe-bottom bg-gradient-to-t from-black/60 to-transparent">
-        <p className="text-center text-white/80 text-sm">
+      {/* Bottom hint — white bar nhỏ, consistent với top bar */}
+      <div className="absolute bottom-0 inset-x-0 px-4 py-2 safe-bottom bg-bg-card shadow-soft">
+        <p className="text-center text-xs text-ink-muted">
           {bottomHint ??
             (summary
-              ? "Quét xong tự thêm vào giỏ — tap Xong khi xong"
+              ? "Quét xong tự thêm vào giỏ — tap X khi xong"
               : "Đưa mã vạch vào khung — máy sẽ tự đọc")}
         </p>
       </div>

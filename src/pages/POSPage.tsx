@@ -454,7 +454,7 @@ export function POSPage() {
         </div>
       </Sheet>
 
-      {/* Scanner — continuous mode (KHÔNG auto-close, cooldown 800ms internal) */}
+      {/* Scanner — continuous mode, per-session unique scan */}
       {showScanner && (
         <Suspense fallback={<ScannerLoadingFallback />}>
           <BarcodeScanner
@@ -462,6 +462,11 @@ export function POSPage() {
             onClose={() => {
               setShowScanner(false);
               setScanFeedback(null);
+            }}
+            onOpenCart={() => {
+              setShowScanner(false);
+              setScanFeedback(null);
+              setShowCart(true);
             }}
             feedback={scanFeedback}
             summary={{ count: itemCount, total }}
