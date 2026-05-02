@@ -2,6 +2,7 @@ import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase";
+import { useAuthStore } from "@/stores/auth";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
 import {
@@ -24,6 +25,11 @@ export function AdminShopNewPage() {
   const navigate = useNavigate();
   const [orgName, setOrgName] = useState("");
   const [ownerEmail, setOwnerEmail] = useState("");
+  const adminEmail = useAuthStore((s) => s.user?.email ?? null);
+  const isSelfOwner =
+    adminEmail !== null &&
+    ownerEmail.trim().length > 0 &&
+    ownerEmail.trim().toLowerCase() === adminEmail.toLowerCase();
   const [taxCode, setTaxCode] = useState("");
   const [address, setAddress] = useState("");
   const [addressDetail, setAddressDetail] = useState<AddressDetail | null>(null);
@@ -47,6 +53,19 @@ export function AdminShopNewPage() {
     setErrors(next);
     setSubmitError(null);
     if (Object.keys(next).length > 0) return;
+
+    // Cảnh báo nếu admin dùng chính email mình → tránh accidental tạo shop
+    // mà admin lại trở thành owner (vd. test xong xóa shop thì admin mất quyền).
+    const adminEmail = useAuthStore.getState().user?.email;
+    if (
+      adminEmail &&
+      ownerEmail.trim().toLowerCase() === adminEmail.toLowerCase()
+    ) {
+      const ok = confirm(
+        "Email này là tài khoản admin của bạn. Tạo shop với chính bạn làm owner?",
+      );
+      if (!ok) return;
+    }
 
     setSubmitting(true);
     try {
@@ -148,6 +167,11 @@ export function AdminShopNewPage() {
               placeholder="owner@example.com"
             />
           </FormField>
+          {isSelfOwner && !errors.ownerEmail && (
+            <p className="-mt-2 text-xs text-accent" role="alert">
+              ⚠ Đây là email admin của bạn — tạo shop sẽ tự đặt bạn làm owner.
+            </p>
+          )}
 
           <div className="grid grid-cols-2 gap-3">
             <FormField label="MST" optional>
