@@ -1,5 +1,5 @@
-import { type FormEvent, lazy, Suspense, useEffect, useState } from "react";
-import { Camera, Loader2 } from "lucide-react";
+import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { Camera, CheckCircle2, Loader2, Sparkles, X } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Sheet } from "@/components/ui/Sheet";
 import { FormField } from "@/components/ui/FormField";
@@ -7,9 +7,14 @@ import { Button } from "@/components/ui/Button";
 import { RoleGate } from "@/components/RoleGate";
 import { productsSync } from "@/integrations/sync/products-sync";
 import { outboxWorker } from "@/integrations/sync/outbox-worker";
+import {
+  contributeBarcode,
+  lookupBarcode,
+  type BarcodeInfo,
+} from "@/integrations/barcode/lookup";
 import { useAuthStore } from "@/stores/auth";
 import { db } from "@/lib/db";
-import { vibrate } from "@/lib/utils";
+import { cn, vibrate } from "@/lib/utils";
 import type { Product } from "@/types";
 
 // Lazy: chunk @zxing/browser chỉ load khi user click "Quét"
@@ -84,6 +89,13 @@ export function ProductFormModal({
   const [submitting, setSubmitting] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
 
+  // Barcode lookup state — prefill từ shared_barcodes hoặc Open Food Facts
+  const [lookupResult, setLookupResult] = useState<BarcodeInfo | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const [lookupDismissed, setLookupDismissed] = useState(false);
+  // Track barcodes user manual edit để KHÔNG re-prefill khi xóa banner
+  const lookupKey = useRef<string | null>(null);
+
   // Reset form khi mở/đóng hoặc khi đổi product
   useEffect(() => {
     if (!open) return;
@@ -108,7 +120,55 @@ export function ProductFormModal({
       setCategory("");
     }
     setErrors({});
+    setLookupResult(null);
+    setLookupDismissed(false);
+    lookupKey.current = null;
   }, [open, product, initialBarcode]);
+
+  // Barcode lookup — debounce 500ms, chỉ trigger khi Add mode + chưa edit
+  // các field meta (name/unit). KHÔNG overwrite nếu user đã gõ tay.
+  useEffect(() => {
+    if (!open || isEdit || lookupDismissed) return;
+    const trimmed = barcode.trim();
+    if (!/^\d{8,14}$/.test(trimmed)) {
+      setLookupResult(null);
+      lookupKey.current = null;
+      return;
+    }
+    if (lookupKey.current === trimmed) return; // đã lookup barcode này rồi
+
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      setLookupLoading(true);
+      try {
+        const info = await lookupBarcode(trimmed);
+        if (cancelled) return;
+        lookupKey.current = trimmed;
+        setLookupResult(info);
+        if (info) {
+          // Prefill — chỉ điền field RỖNG, không overwrite manual input
+          if (!name.trim()) setName(info.name);
+          if (info.brand && !category.trim()) setCategory(info.brand);
+          if (info.defaultUnit && unit === "cái") setUnit(info.defaultUnit);
+        }
+      } finally {
+        if (!cancelled) setLookupLoading(false);
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [barcode, open, isEdit, lookupDismissed]);
+
+  function dismissLookup() {
+    setLookupDismissed(true);
+    setLookupResult(null);
+    // Clear prefilled fields nếu user muốn restart manual
+    setName("");
+    setCategory("");
+  }
 
   // Check trùng barcode (chỉ khi Add hoặc Edit + đổi barcode)
   const duplicateBarcode = useLiveQuery(
@@ -164,6 +224,18 @@ export function ProductFormModal({
         const fresh = await db.products.get(id);
         if (fresh) onProductAdded(fresh);
       }
+      // Contribute barcode lên kho cộng đồng (fire-and-forget, không block).
+      // Nếu lookup là 'shared' → counter increment. Nếu 'openfoodfacts' →
+      // tạo entry mới giúp shop VN sau hit cache. Manual entry → cũng đẩy lên.
+      if (!isEdit && barcode.trim() && /^\d{8,14}$/.test(barcode.trim())) {
+        contributeBarcode({
+          barcode: barcode.trim(),
+          name: name.trim(),
+          brand: category.trim() || undefined,
+          imageUrl: lookupResult?.imageUrl,
+          defaultUnit: unit.trim() || "cái",
+        });
+      }
       onClose();
     } catch (err) {
       setErrors({
@@ -183,6 +255,71 @@ export function ProductFormModal({
     <>
       <Sheet open={open} onClose={onClose} title={isEdit ? "Sửa sản phẩm" : "Thêm sản phẩm"}>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4 px-5 pb-5" noValidate>
+          {/* Lookup banner — chỉ hiển thị Add mode, có result, chưa dismiss */}
+          {!isEdit && (lookupLoading || lookupResult) && (
+            <div
+              className={cn(
+                "flex items-start gap-3 rounded-lg p-3 text-sm",
+                lookupResult?.source === "shared"
+                  ? "bg-primary-50 border border-primary-100 text-primary-800"
+                  : "bg-accent/5 border border-accent/20 text-ink",
+              )}
+              role="status"
+            >
+              {lookupResult?.imageUrl && (
+                <img
+                  src={lookupResult.imageUrl}
+                  alt=""
+                  className="w-12 h-12 rounded object-cover flex-shrink-0 bg-bg-card"
+                  loading="lazy"
+                />
+              )}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5">
+                  {lookupLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin flex-shrink-0" />
+                  ) : (
+                    <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                  )}
+                  <span className="font-medium text-xs">
+                    {lookupLoading
+                      ? "Đang tìm trong kho cộng đồng..."
+                      : lookupResult?.source === "shared"
+                        ? "Tìm thấy trong kho cộng đồng"
+                        : "Tìm thấy từ Open Food Facts"}
+                  </span>
+                </div>
+                {lookupResult && (
+                  <p className="text-sm font-medium mt-0.5 truncate">
+                    {lookupResult.name}
+                    {lookupResult.brand && (
+                      <span className="text-ink-muted font-normal">
+                        {" · "}
+                        {lookupResult.brand}
+                      </span>
+                    )}
+                  </p>
+                )}
+                {lookupResult && (
+                  <p className="text-[11px] text-ink-muted">
+                    Giá bán/giá vốn vẫn cần bạn nhập
+                  </p>
+                )}
+              </div>
+              {lookupResult && (
+                <button
+                  type="button"
+                  onClick={dismissLookup}
+                  aria-label="Bỏ qua gợi ý"
+                  className="p-1 -m-1 rounded hover:bg-black/5 press flex-shrink-0"
+                >
+                  <Sparkles className="hidden" />
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          )}
+
           <FormField label="Tên sản phẩm" error={errors.name}>
             <input
               type="text"

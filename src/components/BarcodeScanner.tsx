@@ -1,8 +1,49 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserMultiFormatReader } from "@zxing/browser";
+import { BarcodeFormat, DecodeHintType } from "@zxing/library";
 import { Camera, X } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { beep, vibrate } from "@/lib/utils";
+
+/**
+ * Format whitelist cho tạp hóa VN:
+ * - EAN-13: chuẩn quốc tế nhất, hàng nhập + nội địa lớn
+ * - EAN-8: bao bì nhỏ
+ * - UPC-A/UPC-E: hàng Bắc Mỹ
+ * - CODE-128: nội bộ shop tự in tem (vd. Sapo/KiotViet xuất)
+ *
+ * KHÔNG include QR / DataMatrix / Aztec / PDF417 vì:
+ * - Tạp hóa không dùng QR product
+ * - ZXing tốc độ scale nghịch số format → ít hơn = nhanh hơn
+ * - TRY_HARDER bù lại cho EAN bị mờ/cong
+ */
+const SUPPORTED_FORMATS = [
+  BarcodeFormat.EAN_13,
+  BarcodeFormat.EAN_8,
+  BarcodeFormat.UPC_A,
+  BarcodeFormat.UPC_E,
+  BarcodeFormat.CODE_128,
+];
+
+const SCANNER_HINTS: Map<DecodeHintType, unknown> = (() => {
+  const h = new Map<DecodeHintType, unknown>();
+  h.set(DecodeHintType.POSSIBLE_FORMATS, SUPPORTED_FORMATS);
+  h.set(DecodeHintType.TRY_HARDER, true);
+  return h;
+})();
+
+/**
+ * Camera constraints — facingMode environment (back camera) + 1280x720.
+ * focusMode 'continuous' best-effort (chỉ Chrome Android + 1 vài browser),
+ * fallback graceful nếu unsupported.
+ */
+const VIDEO_CONSTRAINTS: MediaTrackConstraints = {
+  facingMode: { ideal: "environment" },
+  width: { ideal: 1280 },
+  height: { ideal: 720 },
+  // @ts-expect-error focusMode không có trong DOM types nhưng được hỗ trợ runtime
+  advanced: [{ focusMode: "continuous" }],
+};
 
 interface Props {
   onScan: (barcode: string) => void;
@@ -17,28 +58,21 @@ export function BarcodeScanner({ onScan, onClose }: Props) {
 
   useEffect(() => {
     let cancelled = false;
-    const reader = new BrowserMultiFormatReader();
+    // Restrict formats + TRY_HARDER → faster decode trên mobile (chỉ check 5
+    // format relevant cho tạp hóa thay vì 20+ format mặc định).
+    const reader = new BrowserMultiFormatReader(SCANNER_HINTS);
     readerRef.current = reader;
 
     const start = async () => {
       try {
-        const devices = await BrowserMultiFormatReader.listVideoInputDevices();
-        if (devices.length === 0) {
-          setError("Không tìm thấy camera trên thiết bị này");
-          return;
-        }
-
-        // Ưu tiên camera sau (back) trên điện thoại
-        const back = devices.find((d) =>
-          /back|rear|environment/i.test(d.label),
-        );
-        const deviceId = back?.deviceId ?? devices[0].deviceId;
-
         if (cancelled || !videoRef.current) return;
 
         setScanning(true);
-        await reader.decodeFromVideoDevice(
-          deviceId,
+        // decodeFromConstraints áp constraints lên getUserMedia trực tiếp
+        // (focusMode continuous + back camera + 720p). Skip listVideoInputDevices
+        // vì facingMode 'environment' đã handle deviceId selection.
+        await reader.decodeFromConstraints(
+          { video: VIDEO_CONSTRAINTS, audio: false },
           videoRef.current,
           (result, err) => {
             if (cancelled) return;
