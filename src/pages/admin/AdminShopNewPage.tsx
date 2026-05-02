@@ -4,6 +4,10 @@ import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
+import {
+  AddressAutocomplete,
+  type AddressDetail,
+} from "@/components/AddressAutocomplete";
 
 const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
@@ -21,6 +25,7 @@ export function AdminShopNewPage() {
   const [ownerEmail, setOwnerEmail] = useState("");
   const [taxCode, setTaxCode] = useState("");
   const [address, setAddress] = useState("");
+  const [addressDetail, setAddressDetail] = useState<AddressDetail | null>(null);
   const [phone, setPhone] = useState("");
   const [trialDays, setTrialDays] = useState(30);
   const [monthlyPrice, setMonthlyPrice] = useState(199000);
@@ -52,6 +57,9 @@ export function AdminShopNewPage() {
           owner_email: ownerEmail.trim(),
           tax_code: taxCode.trim() || undefined,
           address: address.trim() || undefined,
+          address_full: addressDetail?.address_full ?? undefined,
+          latitude: addressDetail?.latitude ?? undefined,
+          longitude: addressDetail?.longitude ?? undefined,
           phone: phone.trim() || undefined,
           trial_days: trialDays,
           monthly_price: monthlyPrice,
@@ -140,13 +148,19 @@ export function AdminShopNewPage() {
             </FormField>
           </div>
 
-          <FormField label="Địa chỉ" optional>
-            <textarea
-              rows={2}
+          <FormField
+            label="Địa chỉ"
+            optional
+            hint="Gõ + chọn từ gợi ý để hiển thị shop trên bản đồ"
+          >
+            <AddressAutocomplete
               value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              placeholder="Số nhà, đường, phường/xã, quận/huyện, tỉnh/TP"
-              className="w-full h-auto py-2 px-3 rounded-lg border border-line bg-bg-card resize-none focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              onChange={(next, detail) => {
+                setAddress(next);
+                if (detail) setAddressDetail(detail);
+                else setAddressDetail(null);
+              }}
+              textarea
             />
           </FormField>
         </section>

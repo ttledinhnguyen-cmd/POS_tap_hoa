@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Loader2, Plus, Search } from "lucide-react";
+import { LayoutList, Loader2, Map as MapIcon, Plus, Search } from "lucide-react";
 import { supabase } from "@/integrations/supabase";
 import { Button } from "@/components/ui/Button";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { ShopWithStats, SubscriptionStatus } from "@/types";
+
+const ShopsMap = lazy(() =>
+  import("@/components/admin/ShopsMap").then((m) => ({ default: m.ShopsMap })),
+);
 
 const STATUS_LABEL: Record<SubscriptionStatus, { label: string; cls: string }> = {
   trial: { label: "Trial", cls: "bg-accent/10 text-accent" },
@@ -49,6 +53,7 @@ export function AdminShopsPage() {
     "all",
   );
   const [query, setQuery] = useState("");
+  const [view, setView] = useState<"table" | "map">("table");
 
   useEffect(() => {
     let cancelled = false;
@@ -96,11 +101,43 @@ export function AdminShopsPage() {
             {shops.length} tiệm trong hệ thống
           </p>
         </div>
-        <Button variant="primary" onClick={() => navigate("/admin/shops/new")}>
-          <Plus className="w-5 h-5" />
-          <span className="hidden md:inline">Tạo shop mới</span>
-          <span className="md:hidden">Tạo</span>
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Segmented toggle: Bảng / Bản đồ */}
+          <div className="flex bg-bg-subtle rounded-lg p-0.5">
+            <button
+              type="button"
+              onClick={() => setView("table")}
+              aria-pressed={view === "table"}
+              className={cn(
+                "flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium press",
+                view === "table"
+                  ? "bg-bg-card shadow-soft text-ink"
+                  : "text-ink-muted",
+              )}
+            >
+              <LayoutList className="w-4 h-4" />
+              <span className="hidden md:inline">Bảng</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("map")}
+              aria-pressed={view === "map"}
+              className={cn(
+                "flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium press",
+                view === "map"
+                  ? "bg-bg-card shadow-soft text-ink"
+                  : "text-ink-muted",
+              )}
+            >
+              <MapIcon className="w-4 h-4" />
+              <span className="hidden md:inline">Bản đồ</span>
+            </button>
+          </div>
+          <Button variant="primary" onClick={() => navigate("/admin/shops/new")}>
+            <Plus className="w-5 h-5" />
+            <span className="hidden md:inline">Tạo</span>
+          </Button>
+        </div>
       </div>
 
       {/* Filter tabs */}
@@ -136,9 +173,23 @@ export function AdminShopsPage() {
         </div>
       </div>
 
-      {/* List */}
+      {/* List / Map */}
       <div className="flex-1 px-4 md:px-6 py-3 pb-6">
-        {loading ? (
+        {!loading && !error && view === "map" && (
+          <Suspense
+            fallback={
+              <div className="h-[500px] rounded-lg border border-line bg-bg-subtle flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-ink-muted" />
+              </div>
+            }
+          >
+            <ShopsMap
+              shops={filtered}
+              onShopClick={(orgId) => navigate(`/admin/shops/${orgId}`)}
+            />
+          </Suspense>
+        )}
+        {view === "table" && (loading ? (
           <div className="flex items-center justify-center py-16">
             <Loader2 className="w-6 h-6 animate-spin text-primary-700" />
           </div>
@@ -205,7 +256,7 @@ export function AdminShopsPage() {
               );
             })}
           </ul>
-        )}
+        ))}
       </div>
     </div>
   );

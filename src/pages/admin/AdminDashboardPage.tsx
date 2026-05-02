@@ -1,5 +1,10 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+
+// Lazy: Goong SDK (~150KB gzip) chỉ load khi admin xem dashboard
+const ShopsMap = lazy(() =>
+  import("@/components/admin/ShopsMap").then((m) => ({ default: m.ShopsMap })),
+);
 import {
   AlertCircle,
   Building2,
@@ -60,6 +65,7 @@ function daysUntil(dateStr: string | null): number | null {
 }
 
 export function AdminDashboardPage() {
+  const navigate = useNavigate();
   const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [shops, setShops] = useState<ShopWithStats[]>([]);
   const [loading, setLoading] = useState(true);
@@ -186,6 +192,25 @@ export function AdminDashboardPage() {
             />
           </div>
         )}
+
+        {/* Map */}
+        <section>
+          <h2 className="text-sm font-semibold mb-2 flex items-center gap-2">
+            Bản đồ shops
+          </h2>
+          <Suspense
+            fallback={
+              <div className="h-[300px] md:h-[500px] rounded-lg border border-line bg-bg-subtle flex items-center justify-center">
+                <Loader2 className="w-6 h-6 animate-spin text-ink-muted" />
+              </div>
+            }
+          >
+            <ShopsMap
+              shops={shops}
+              onShopClick={(orgId) => navigate(`/admin/shops/${orgId}`)}
+            />
+          </Suspense>
+        </section>
 
         {/* Need attention */}
         {needAttention.length > 0 && (

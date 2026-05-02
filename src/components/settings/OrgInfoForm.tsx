@@ -5,6 +5,10 @@ import { Button } from "@/components/ui/Button";
 import { supabase } from "@/integrations/supabase";
 import { useAuthStore, useCurrentOrg } from "@/stores/auth";
 import { vibrate } from "@/lib/utils";
+import {
+  AddressAutocomplete,
+  type AddressDetail,
+} from "@/components/AddressAutocomplete";
 
 const TAX_CODE_RE = /^\d{10}$|^\d{13}$/;
 const PHONE_RE = /^0\d{9,10}$/;
@@ -23,6 +27,9 @@ export function OrgInfoForm() {
   const [name, setName] = useState("");
   const [taxCode, setTaxCode] = useState("");
   const [address, setAddress] = useState("");
+  // Lat/lng/address_full chỉ update khi user chọn từ Goong autocomplete.
+  // Khi component hydrate từ currentOrg, dùng giá trị đã save từ trước.
+  const [addressDetail, setAddressDetail] = useState<AddressDetail | null>(null);
   const [phone, setPhone] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
@@ -36,6 +43,17 @@ export function OrgInfoForm() {
     setTaxCode(currentOrg.tax_code ?? "");
     setAddress(currentOrg.address ?? "");
     setPhone(currentOrg.phone ?? "");
+    // Hydrate detail từ existing lat/lng (nếu đã save). User không chọn lại
+    // autocomplete thì giữ nguyên — tránh mất lat/lng khi save edit field khác.
+    if (currentOrg.latitude !== null && currentOrg.longitude !== null) {
+      setAddressDetail({
+        address_full: currentOrg.address_full ?? currentOrg.address ?? "",
+        latitude: Number(currentOrg.latitude),
+        longitude: Number(currentOrg.longitude),
+      });
+    } else {
+      setAddressDetail(null);
+    }
     setErrors({});
     setSavedAt(null);
     setSubmitError(undefined);
@@ -68,16 +86,18 @@ export function OrgInfoForm() {
     if (Object.keys(next).length > 0) return;
 
     setSubmitting(true);
-    const payload = {
-      name: name.trim(),
-      tax_code: taxCode.trim() ? taxCode.replace(/[\s-]/g, "") : null,
-      address: address.trim() || null,
-      phone: phone.trim() ? phone.replace(/[\s-]/g, "") : null,
-    };
-    const { error } = await supabase
-      .from("organizations")
-      .update(payload)
-      .eq("id", orgId);
+    // Dùng RPC update_organization (security definer, gate qua memberships
+    // owner check). Nhận thêm address_full + lat/lng từ Goong detail.
+    const { error } = await supabase.rpc("update_organization", {
+      p_org_id: orgId,
+      p_name: name.trim(),
+      p_tax_code: taxCode.trim() ? taxCode.replace(/[\s-]/g, "") : null,
+      p_address: address.trim() || null,
+      p_address_full: addressDetail?.address_full ?? null,
+      p_phone: phone.trim() ? phone.replace(/[\s-]/g, "") : null,
+      p_latitude: addressDetail?.latitude ?? null,
+      p_longitude: addressDetail?.longitude ?? null,
+    });
     setSubmitting(false);
 
     if (error) {
@@ -121,13 +141,20 @@ export function OrgInfoForm() {
         />
       </FormField>
 
-      <FormField label="Địa chỉ" optional>
-        <textarea
-          rows={2}
+      <FormField
+        label="Địa chỉ"
+        optional
+        hint="Gõ + chọn từ gợi ý để tiệm hiển thị trên bản đồ admin"
+      >
+        <AddressAutocomplete
           value={address}
-          onChange={(e) => setAddress(e.target.value)}
-          placeholder="Số nhà, đường, phường/xã, quận/huyện"
-          className="h-auto py-2 resize-none"
+          onChange={(next, detail) => {
+            setAddress(next);
+            if (detail) setAddressDetail(detail);
+            // KHÔNG clear addressDetail khi user gõ tay — giữ lat/lng cũ
+            // đến khi user chọn lại suggestion mới.
+          }}
+          textarea
         />
       </FormField>
 

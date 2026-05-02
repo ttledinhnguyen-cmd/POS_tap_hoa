@@ -22,7 +22,10 @@ export interface Organization {
   name: string;
   tax_code: string | null;
   address: string | null;
+  address_full: string | null;
   phone: string | null;
+  latitude: number | null;
+  longitude: number | null;
   created_at: string;
   updated_at: string;
 }
