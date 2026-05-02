@@ -6,11 +6,10 @@ import { Button } from "@/components/ui/Button";
 import { formatVND } from "@/lib/format";
 import { beep, vibrate } from "@/lib/utils";
 
-/**
- * Cooldown between same-barcode scans (ms). Tránh detect duplicate khi giữ
- * lâu trong frame. Khác barcode accept ngay.
- */
-const SAME_BARCODE_COOLDOWN_MS = 800;
+// Per-session unique-scan: trong 1 lần mở scanner, mỗi EAN chỉ fire onScan 1 lần.
+// Cashier muốn 2 chai cùng loại → đóng scanner + mở lại + scan lại, hoặc tăng
+// qty trong cart sheet. Pattern này phù hợp tạp hoá (đa số mua 1 món/loại) +
+// loại bỏ 100% spam khi giữ camera lâu trên frame.
 
 /**
  * Format whitelist cho tạp hóa VN:
@@ -99,9 +98,10 @@ export function BarcodeScanner({
   // Local toast visibility — auto-fade sau 1.5s từ feedback.timestamp
   const [toastVisible, setToastVisible] = useState(false);
 
-  // Cooldown refs (không trigger re-render)
-  const lastBarcodeRef = useRef<string | null>(null);
-  const lastScannedAtRef = useRef<number>(0);
+  // Per-session unique scan — Set reset mỗi lần component mount (scanner open).
+  // Khi user tap "Xong" → component unmount → Set tự GC. Mở lại → Set rỗng,
+  // scan lại EAN cũ được +1 nữa.
+  const scannedBarcodesRef = useRef<Set<string>>(new Set());
 
   // onScan ref để callback ZXing không re-bind mỗi render (giữ stable closure)
   const onScanRef = useRef(onScan);
@@ -142,17 +142,13 @@ export function BarcodeScanner({
             if (cancelled) return;
             if (result) {
               const text = result.getText();
-              const now = Date.now();
-              // Cooldown: same barcode scan lại trong 800ms → skip (tránh
-              // duplicate khi giữ lâu trong frame). Barcode khác accept ngay.
-              if (
-                text === lastBarcodeRef.current &&
-                now - lastScannedAtRef.current < SAME_BARCODE_COOLDOWN_MS
-              ) {
+              // Per-session unique: EAN đã quét trong session này → skip
+              // (tránh tăng qty khi giữ frame, tránh spam khi camera detect
+              // multiple frames của cùng barcode).
+              if (scannedBarcodesRef.current.has(text)) {
                 return;
               }
-              lastBarcodeRef.current = text;
-              lastScannedAtRef.current = now;
+              scannedBarcodesRef.current.add(text);
               beep(880, 80);
               vibrate(40);
               onScanRef.current(text);

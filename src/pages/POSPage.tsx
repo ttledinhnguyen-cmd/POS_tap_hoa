@@ -76,6 +76,14 @@ export function POSPage() {
   const [query, setQuery] = useState("");
   const [debounced, setDebounced] = useState("");
   const [flashId, setFlashId] = useState<string | null>(null);
+  /**
+   * Category filter:
+   *   null         = Tất cả
+   *   "<name>"     = match product.category === name
+   *   "__OTHER__"  = product không có category (null/rỗng)
+   */
+  const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
+  const OTHER_KEY = "__OTHER__";
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim().toLowerCase()), 150);
@@ -93,13 +101,33 @@ export function POSPage() {
     [],
   );
 
-  const filteredProducts = useMemo(() => {
+  // Distinct categories từ org products (sort alphabet, exclude null/rỗng).
+  // hasOther = có product không category → render chip "Khác".
+  const { categoryList, hasOther } = useMemo(() => {
     const list = products ?? [];
+    const set = new Set<string>();
+    let other = false;
+    for (const p of list) {
+      const c = p.category?.trim();
+      if (c) set.add(c);
+      else other = true;
+    }
+    return {
+      categoryList: Array.from(set).sort((a, b) => a.localeCompare(b, "vi")),
+      hasOther: other,
+    };
+  }, [products]);
+
+  const filteredProducts = useMemo(() => {
+    let list = products ?? [];
+    // Apply category filter trước (AND với search)
+    if (categoryFilter === OTHER_KEY) {
+      list = list.filter((p) => !p.category?.trim());
+    } else if (categoryFilter !== null) {
+      list = list.filter((p) => p.category?.trim() === categoryFilter);
+    }
     if (!debounced) {
-      // Default: show all sorted by updatedAt desc, max 20
-      return [...list]
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, 20);
+      return [...list].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 20);
     }
     return list
       .filter(
@@ -108,7 +136,7 @@ export function POSPage() {
           p.barcode.includes(debounced),
       )
       .slice(0, 30);
-  }, [products, debounced]);
+  }, [products, debounced, categoryFilter]);
 
   function handlePickProduct(p: Product) {
     addProduct(p);
@@ -230,6 +258,34 @@ export function POSPage() {
           />
         </div>
       </div>
+
+      {/* Category chips — chỉ render khi có sản phẩm */}
+      {(products?.length ?? 0) > 0 && (categoryList.length > 0 || hasOther) && (
+        <div className="bg-bg-card border-b border-line flex-shrink-0 overflow-x-auto">
+          <div className="flex gap-2 px-4 py-2 w-max">
+            <CategoryChip
+              label="Tất cả"
+              active={categoryFilter === null}
+              onClick={() => setCategoryFilter(null)}
+            />
+            {categoryList.map((c) => (
+              <CategoryChip
+                key={c}
+                label={c}
+                active={categoryFilter === c}
+                onClick={() => setCategoryFilter(c)}
+              />
+            ))}
+            {hasOther && (
+              <CategoryChip
+                label="Khác"
+                active={categoryFilter === OTHER_KEY}
+                onClick={() => setCategoryFilter(OTHER_KEY)}
+              />
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Product list — main area */}
       <div className="flex-1 overflow-y-auto">
@@ -560,5 +616,33 @@ export function POSPage() {
         }}
       />
     </div>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// CategoryChip — pill chip cho category filter
+// ----------------------------------------------------------------------------
+function CategoryChip({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "px-3 py-1.5 rounded-full text-sm font-medium press flex-shrink-0 whitespace-nowrap",
+        active
+          ? "bg-primary-700 text-white"
+          : "bg-bg-subtle text-ink hover:bg-line",
+      )}
+    >
+      {label}
+    </button>
   );
 }
