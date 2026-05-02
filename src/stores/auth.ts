@@ -9,6 +9,7 @@ import { productsSync } from "@/integrations/sync/products-sync";
 import { ordersSync } from "@/integrations/sync/orders-sync";
 import { inventorySync } from "@/integrations/sync/inventory-sync";
 import { stockTakeSync } from "@/integrations/sync/stock-take-sync";
+import { categoriesSync } from "@/integrations/sync/categories-sync";
 import type { Subscription } from "@/types";
 import { seedIfEmptyForOrg } from "@/lib/seed";
 
@@ -93,11 +94,13 @@ async function syncForOrg(orgId: string): Promise<void> {
       ordersSync.pullOrdersIfNeeded(orgId),
       inventorySync.pullReceiptsIfNeeded(orgId),
       stockTakeSync.pullStockTakesIfNeeded(orgId),
+      categoriesSync.pullCategoriesIfNeeded(orgId),
     ]);
     productsSync.subscribeRealtime(orgId);
     ordersSync.subscribeRealtime(orgId);
     inventorySync.subscribeRealtime(orgId);
     stockTakeSync.subscribeRealtime(orgId);
+    categoriesSync.subscribeRealtime(orgId);
     // Dev seed (chỉ DEV + orgId rỗng products): seedIfEmptyForOrg tự kiểm tra
     await seedIfEmptyForOrg(orgId);
   } catch (err) {
@@ -182,6 +185,7 @@ export const useAuthStore = create<AuthState>()(
               ordersSync.unsubscribeAndReset();
               inventorySync.unsubscribeAndReset();
               stockTakeSync.unsubscribeAndReset();
+              categoriesSync.unsubscribeAndReset();
             }, 0);
             return;
           }

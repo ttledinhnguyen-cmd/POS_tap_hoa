@@ -1,5 +1,6 @@
 import Dexie, { type EntityTable } from "dexie";
 import type {
+  Category,
   GoodsReceipt,
   GoodsReceiptItem,
   Order,
@@ -35,6 +36,7 @@ export class POSDatabase extends Dexie {
   goodsReceiptItems!: EntityTable<GoodsReceiptItem, "id">;
   stockTakes!: EntityTable<StockTake, "id">;
   stockTakeItems!: EntityTable<StockTakeItem, "id">;
+  categories!: EntityTable<Category, "id">;
   outbox!: EntityTable<OutboxJob, "id">;
 
   constructor() {
@@ -114,6 +116,19 @@ export class POSDatabase extends Dexie {
       goodsReceiptItems: "id, receiptId, productId, [receiptId+productId]",
       stockTakes: "id, orgId, [orgId+takeDate], takeDate, status, updatedAt",
       stockTakeItems: "id, stockTakeId, productId, [stockTakeId+productId]",
+      outbox: "id, type, status, nextRunAt, createdAt",
+    });
+    // v7: categories table (quản lý danh mục per-org)
+    this.version(7).stores({
+      products:
+        "id, orgId, barcode, [orgId+barcode], [orgId+isActive], name, category, updatedAt",
+      orders: "id, orgId, [orgId+createdAt], invoiceStatus, updatedAt",
+      orderItems: "id, orderId, productId, [orderId+productId]",
+      goodsReceipts: "id, orgId, [orgId+receiptDate], receiptDate, updatedAt",
+      goodsReceiptItems: "id, receiptId, productId, [receiptId+productId]",
+      stockTakes: "id, orgId, [orgId+takeDate], takeDate, status, updatedAt",
+      stockTakeItems: "id, stockTakeId, productId, [stockTakeId+productId]",
+      categories: "id, orgId, [orgId+displayOrder], updatedAt",
       outbox: "id, type, status, nextRunAt, createdAt",
     });
   }

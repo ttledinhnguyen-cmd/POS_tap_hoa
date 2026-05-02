@@ -8,6 +8,7 @@ import {
   Pencil,
   Plus,
   Search,
+  Tags,
   Trash2,
   Upload,
 } from "lucide-react";
@@ -20,6 +21,13 @@ import { ProductDeleteConfirm } from "@/components/products/ProductDeleteConfirm
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Product } from "@/types";
+
+// Lazy: CategoryManagerSheet — chỉ owner click "Danh mục sản phẩm" mới load
+const CategoryManagerSheet = lazy(() =>
+  import("@/components/products/CategoryManagerSheet").then((m) => ({
+    default: m.CategoryManagerSheet,
+  })),
+);
 
 // Lazy: BulkImportSheet kéo theo SheetJS (~100 KB gzip).
 // Chỉ load khi owner click "Nhập từ Excel" — initial bundle không bị bloat.
@@ -53,6 +61,7 @@ export function ProductsPage() {
   const [editing, setEditing] = useState<Product | null>(null);
   const [deleting, setDeleting] = useState<Product | null>(null);
   const [showBulkImport, setShowBulkImport] = useState(false);
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
 
   // Banner "Đã nhập kho thành công" sau redirect từ /inventory/receive
@@ -104,8 +113,15 @@ export function ProductsPage() {
         </div>
         {/* Action buttons — desktop inline 3 buttons / mobile dropdown menu */}
         <RoleGate allow={["owner"]}>
-          {/* Desktop: 3 inline buttons */}
-          <div className="hidden md:flex gap-2">
+          {/* Desktop: inline buttons */}
+          <div className="hidden md:flex gap-2 flex-wrap justify-end">
+            <Button
+              variant="outline"
+              onClick={() => setShowCategoryManager(true)}
+            >
+              <Tags className="w-5 h-5" />
+              Danh mục
+            </Button>
             <Button
               variant="outline"
               onClick={() => navigate("/inventory/receive")}
@@ -160,6 +176,18 @@ export function ProductsPage() {
                   >
                     <Package2 className="w-4 h-4 text-ink-muted" />
                     Nhập kho
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setShowActionsMenu(false);
+                      setShowCategoryManager(true);
+                    }}
+                    className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-left hover:bg-bg-subtle press"
+                  >
+                    <Tags className="w-4 h-4 text-ink-muted" />
+                    Danh mục sản phẩm
                   </button>
                   <button
                     type="button"
@@ -273,6 +301,15 @@ export function ProductsPage() {
           <BulkImportSheet
             open={showBulkImport}
             onClose={() => setShowBulkImport(false)}
+          />
+        </Suspense>
+      )}
+      {/* Category manager — lazy chunk */}
+      {showCategoryManager && (
+        <Suspense fallback={null}>
+          <CategoryManagerSheet
+            open={showCategoryManager}
+            onClose={() => setShowCategoryManager(false)}
           />
         </Suspense>
       )}

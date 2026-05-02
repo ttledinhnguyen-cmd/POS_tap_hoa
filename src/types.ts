@@ -71,6 +71,19 @@ export interface OrderItem {
 export type Role = "cashier" | "owner";
 
 /**
+ * Danh mục sản phẩm per-org. products.category vẫn là TEXT free-form,
+ * không FK — categories table chỉ giúp UI quản lý + thứ tự + cascade rename.
+ */
+export interface Category {
+  id: string;
+  orgId: string;
+  name: string;
+  displayOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/**
  * Phiếu nhập kho (goods receipt) — header.
  * Items lưu ở table riêng `goodsReceiptItems` (Dexie v5).
  */

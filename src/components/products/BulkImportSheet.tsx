@@ -11,6 +11,7 @@ import { Sheet } from "@/components/ui/Sheet";
 import { Button } from "@/components/ui/Button";
 import { supabase } from "@/integrations/supabase";
 import { productsSync } from "@/integrations/sync/products-sync";
+import { contributeBarcode } from "@/integrations/barcode/lookup";
 import { useAuthStore } from "@/stores/auth";
 import { vibrate } from "@/lib/utils";
 import { cn } from "@/lib/utils";
@@ -523,6 +524,18 @@ export function BulkImportSheet({ open, onClose }: Props) {
           inserted += chunk.length - dbDupesInChunk;
         } else {
           inserted += chunk.length;
+        }
+        // Contribute mỗi product có barcode hợp lệ vào kho cộng đồng
+        // (fire-and-forget per row, không block import progress).
+        for (const p of chunk) {
+          if (p.barcode && /^\d{8,14}$/.test(p.barcode)) {
+            contributeBarcode({
+              barcode: p.barcode,
+              name: p.name,
+              brand: p.category ?? undefined,
+              defaultUnit: p.unit ?? "cái",
+            }).catch(() => undefined);
+          }
         }
         setCompletedChunks(i + 1);
       }

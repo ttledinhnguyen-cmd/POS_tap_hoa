@@ -101,22 +101,47 @@ export function POSPage() {
     [],
   );
 
-  // Distinct categories từ org products (sort alphabet, exclude null/rỗng).
-  // hasOther = có product không category → render chip "Khác".
+  // Categories từ table mới (sort theo display_order do owner set).
+  // Fallback: nếu categories table rỗng (org cũ chưa migrate / chưa tạo) →
+  // derive từ distinct products.category như behavior cũ.
+  const orgCategories = useLiveQuery(
+    async () => {
+      if (!orgId) return [];
+      const list = await db.categories.where({ orgId }).toArray();
+      return list.sort((a, b) => a.displayOrder - b.displayOrder);
+    },
+    [orgId],
+    [],
+  );
+
+  // hasOther = có product không category → render chip "Khác" (luôn derive).
   const { categoryList, hasOther } = useMemo(() => {
     const list = products ?? [];
-    const set = new Set<string>();
     let other = false;
+    for (const p of list) {
+      if (!p.category?.trim()) {
+        other = true;
+        break;
+      }
+    }
+    // Nếu có table categories → dùng order do owner set
+    if (orgCategories.length > 0) {
+      return {
+        categoryList: orgCategories.map((c) => c.name),
+        hasOther: other,
+      };
+    }
+    // Fallback: derive distinct from products
+    const set = new Set<string>();
     for (const p of list) {
       const c = p.category?.trim();
       if (c) set.add(c);
-      else other = true;
     }
     return {
       categoryList: Array.from(set).sort((a, b) => a.localeCompare(b, "vi")),
       hasOther: other,
     };
-  }, [products]);
+  }, [products, orgCategories]);
 
   const filteredProducts = useMemo(() => {
     let list = products ?? [];

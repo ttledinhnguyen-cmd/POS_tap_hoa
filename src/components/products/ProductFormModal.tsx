@@ -1,4 +1,4 @@
-import { type FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { type FormEvent, lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { Camera, CheckCircle2, Loader2, Sparkles, X } from "lucide-react";
 import { useLiveQuery } from "dexie-react-hooks";
 import { Sheet } from "@/components/ui/Sheet";
@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/Button";
 import { RoleGate } from "@/components/RoleGate";
 import { productsSync } from "@/integrations/sync/products-sync";
 import { outboxWorker } from "@/integrations/sync/outbox-worker";
+import { categoriesSync } from "@/integrations/sync/categories-sync";
 import {
   contributeBarcode,
   lookupBarcode,
@@ -205,6 +206,22 @@ export function ProductFormModal({
 
     setSubmitting(true);
     try {
+      // Auto-create category nếu user gõ tên mới chưa có trong list (combobox)
+      const trimmedCategory = category.trim();
+      if (trimmedCategory) {
+        const existing = await db.categories
+          .where({ orgId, name: trimmedCategory })
+          .first();
+        if (!existing) {
+          // Fire-and-forget — RPC server idempotent (trùng tên → return existing id)
+          categoriesSync.create(orgId, trimmedCategory).catch((err) => {
+            if (import.meta.env.DEV) {
+              console.warn("[ProductFormModal] auto-create category failed:", err);
+            }
+          });
+        }
+      }
+
       const id = await productsSync.upsertProduct(orgId, {
         id: product?.id,
         barcode: barcode.trim(),
@@ -214,7 +231,7 @@ export function ProductFormModal({
         priceCost: pc,
         stock: s,
         taxRate,
-        category: category.trim() || undefined,
+        category: trimmedCategory || undefined,
       });
       // Trigger drain ngay (UX feedback nhanh)
       outboxWorker.drainNow();
@@ -225,15 +242,22 @@ export function ProductFormModal({
         if (fresh) onProductAdded(fresh);
       }
       // Contribute barcode lên kho cộng đồng (fire-and-forget, không block).
-      // Nếu lookup là 'shared' → counter increment. Nếu 'openfoodfacts' →
-      // tạo entry mới giúp shop VN sau hit cache. Manual entry → cũng đẩy lên.
-      if (!isEdit && barcode.trim() && /^\d{8,14}$/.test(barcode.trim())) {
+      // FIX: gọi UNCONDITIONAL khi có barcode hợp lệ — bất kể add/edit, bất
+      // kể source (shared/OFF/manual). Mỗi product save = 1 contribute, đó
+      // mới là network effect thực sự. Trước đây chỉ fire khi !isEdit và có
+      // lookupResult → Hảo Hảo, Coca, Kẹo VN nội địa user gõ tay không bao
+      // giờ vào kho cộng đồng.
+      if (barcode.trim() && /^\d{8,14}$/.test(barcode.trim())) {
         contributeBarcode({
           barcode: barcode.trim(),
           name: name.trim(),
-          brand: category.trim() || undefined,
+          brand: trimmedCategory || undefined,
           imageUrl: lookupResult?.imageUrl,
           defaultUnit: unit.trim() || "cái",
+        }).catch((err) => {
+          if (import.meta.env.DEV) {
+            console.warn("[ProductFormModal] contribute failed:", err);
+          }
         });
       }
       onClose();
@@ -414,13 +438,12 @@ export function ProductFormModal({
             </select>
           </FormField>
 
-          <FormField label="Danh mục" optional>
-            <input
-              type="text"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-              placeholder="Mì gói, Sữa, Gia vị..."
-            />
+          <FormField
+            label="Danh mục"
+            optional
+            hint="Chọn từ danh sách hoặc gõ tên mới — sẽ tự tạo khi lưu"
+          >
+            <CategoryCombobox value={category} onChange={setCategory} />
           </FormField>
 
           {errors._form && (
@@ -460,5 +483,89 @@ export function ProductFormModal({
         </Suspense>
       )}
     </>
+  );
+}
+
+// ----------------------------------------------------------------------------
+// CategoryCombobox — input + dropdown autocomplete suggestions từ Dexie
+// ----------------------------------------------------------------------------
+function CategoryCombobox({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (next: string) => void;
+}) {
+  const orgId = useAuthStore((s) => s.currentOrgId);
+  const [open, setOpen] = useState(false);
+
+  const categories = useLiveQuery(
+    async () => {
+      if (!orgId) return [];
+      const list = await db.categories.where({ orgId }).toArray();
+      return list.sort((a, b) => a.displayOrder - b.displayOrder);
+    },
+    [orgId],
+    [],
+  );
+
+  const filtered = useMemo(() => {
+    const q = value.trim().toLowerCase();
+    if (!q) return categories;
+    return categories.filter((c) => c.name.toLowerCase().includes(q));
+  }, [categories, value]);
+
+  // Đóng dropdown khi click ngoài (mobile-friendly với pointerdown)
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: PointerEvent) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", handler);
+    return () => document.removeEventListener("pointerdown", handler);
+  }, [open]);
+
+  const isExactMatch = categories.some(
+    (c) => c.name.toLowerCase() === value.trim().toLowerCase(),
+  );
+
+  return (
+    <div ref={wrapperRef} className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => {
+          onChange(e.target.value);
+          if (!open) setOpen(true);
+        }}
+        onFocus={() => setOpen(true)}
+        placeholder="Chọn hoặc gõ tên danh mục mới..."
+      />
+      {open && (filtered.length > 0 || (value.trim() && !isExactMatch)) && (
+        <div className="absolute left-0 right-0 top-[calc(100%+4px)] z-30 max-h-56 overflow-y-auto bg-bg-card border border-line rounded-lg shadow-soft py-1">
+          {filtered.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => {
+                onChange(c.name);
+                setOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 text-sm hover:bg-bg-subtle press"
+            >
+              {c.name}
+            </button>
+          ))}
+          {value.trim() && !isExactMatch && (
+            <div className="px-3 py-2 text-xs text-ink-muted border-t border-line/60">
+              Lưu sẽ tự tạo danh mục mới: <span className="font-medium text-primary-700">"{value.trim()}"</span>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
