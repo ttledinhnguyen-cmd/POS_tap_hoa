@@ -7,8 +7,10 @@ import { cn } from "@/lib/utils";
 interface Props {
   children: ReactNode;
   /**
-   * Khi true, mobile (<768px) sẽ KHÔNG render Header + BottomNav.
-   * Dùng cho POSPage vốn đã có header + action bar nội bộ.
+   * Khi true, mobile (<768px) sẽ KHÔNG render Header (POSPage có header riêng).
+   * BottomNav vẫn render — user phải có cách navigate ra khỏi POS sang
+   * Sản phẩm / Báo cáo / Cài đặt. Trước đây prop này hide cả nav, gây bug
+   * mobile user kẹt ở POS không thoát được.
    * Desktop (>=768px) luôn render Sidebar bất kể prop này.
    */
   mobileChromeless?: boolean;
@@ -55,7 +57,8 @@ export function AppLayout({ children, mobileChromeless = false }: Props) {
           {children}
         </div>
 
-        {!mobileChromeless && <BottomNav />}
+        {/* BottomNav LUÔN hiển thị mobile — escape hatch ra khỏi POS */}
+        <BottomNav />
       </div>
     </div>
   );

@@ -57,7 +57,7 @@ export function POSPage() {
   };
 
   return (
-    <div className="flex flex-col h-dvh bg-bg">
+    <div className="flex flex-col h-full bg-bg">
       {/* Header — gọn, không chiếm chỗ */}
       <header className="flex items-center justify-between px-4 h-14 bg-bg-card border-b border-line safe-top">
         <div className="flex items-center gap-2">
