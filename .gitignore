@@ -3,6 +3,10 @@ dist
 dist-ssr
 *.local
 
+# Windows: metadata thư mục do Explorer sinh ra, rải khắp repo vì thư mục cha
+# D:\Hosting được customize. Không phải file của project.
+desktop.ini
+
 # Editor
 .vscode/*
 !.vscode/extensions.json

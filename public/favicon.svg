@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Tạp Hóa POS">
+  <rect width="512" height="512" fill="#0F766E"/>
+  <path d="M196 212a60 60 0 0 1 120 0" fill="none" stroke="#fff" stroke-width="26" stroke-linecap="round"/>
+  <rect x="146" y="212" width="220" height="42" rx="18" fill="#fff"/>
+  <path d="M166 262h180l-28 126H194z" fill="#fff"/>
+  <g fill="#0F766E">
+    <rect x="214.5" y="292" width="15" height="66" rx="7.5"/>
+    <rect x="248.5" y="292" width="15" height="66" rx="7.5"/>
+    <rect x="282.5" y="292" width="15" height="66" rx="7.5"/>
+  </g>
+</svg>

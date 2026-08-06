@@ -7,11 +7,17 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      // Workaround: workbox-build sinh SW lỗi khi cwd chứa apostrophe (vd. "Hao's Projects").
-      // Path deploy Linux không có apostrophe nên PWA tự enable bình thường.
-      disable: process.cwd().includes("'"),
+      // `injectManifest` thay vì `generateSW`: generateSW sinh template chứa
+      // `import ... from '<abs path>/node_modules/workbox-*/...'`, mà repo nằm
+      // ở D:\Hosting\Hao's Projects\... — dấu nháy phá vỡ chuỗi JS → build fail
+      // → bản production trước đây KHÔNG có service worker (mất offline, mất
+      // "Thêm vào màn hình chính"). injectManifest chỉ thay `self.__WB_MANIFEST`
+      // nên không phụ thuộc đường dẫn. ĐỪNG đổi ngược về generateSW.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
-      includeAssets: ["favicon.svg"],
+      includeAssets: ["favicon.svg", "apple-touch-icon.png"],
       manifest: {
         name: "Tạp Hóa POS",
         short_name: "TapHoa",
@@ -27,16 +33,32 @@ export default defineConfig({
             src: "/icon-192.png",
             sizes: "192x192",
             type: "image/png",
+            purpose: "any",
           },
           {
             src: "/icon-512.png",
             sizes: "512x512",
             type: "image/png",
+            purpose: "any",
+          },
+          // Khai riêng maskable thay vì "any maskable" gộp — browser xử lý
+          // chuỗi gộp không nhất quán. Glyph nằm trong safe zone 80%.
+          {
+            src: "/icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
           },
         ],
       },
-      workbox: {
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,svg,png,ico,woff2}"],
+        // Hai chunk này chỉ dùng khi CÓ mạng: goong-js là bản đồ (trang admin),
+        // xlsx là nhập hàng loạt (việc setup của chủ, không phải bán hàng).
+        // Precache chúng tốn thêm ~1.2 MB trên 4G/3G mà không giúp bán offline.
+        // Không giới hạn .js — goong-js còn kèm ~52 KB CSS, precache riêng
+        // phần CSS là vô nghĩa khi phần JS đã bị loại.
+        globIgnores: ["**/goong-js-*", "**/xlsx-*"],
       },
     }),
   ],

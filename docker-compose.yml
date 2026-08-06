@@ -1,6 +1,16 @@
 services:
   app:
-    build: .
+    build:
+      context: .
+      # Vite cần các biến VITE_* NGAY LÚC BUILD (inline vào bundle), không phải
+      # lúc runtime. Đọc từ file .env cạnh docker-compose.yml (xem .env.example).
+      args:
+        VITE_SUPABASE_URL: "${VITE_SUPABASE_URL:?Thieu VITE_SUPABASE_URL trong .env}"
+        VITE_SUPABASE_ANON_KEY: "${VITE_SUPABASE_ANON_KEY:?Thieu VITE_SUPABASE_ANON_KEY trong .env}"
+        VITE_GOONG_API_KEY: "${VITE_GOONG_API_KEY:-}"
+        VITE_SUPPORT_ZALO: "${VITE_SUPPORT_ZALO:-}"
+        VITE_SUPPORT_EMAIL: "${VITE_SUPPORT_EMAIL:-}"
+        VITE_BUSINESS_NAME: "${VITE_BUSINESS_NAME:-}"
     container_name: pos-tap-hoa
     restart: unless-stopped
     ports:
@@ -8,9 +18,10 @@ services:
       - "443:443"
       - "443:443/udp" # HTTP/3
     environment:
-      # Đổi DOMAIN trong file .env (xem .env.example)
-      DOMAIN: ${DOMAIN:-pos.example.com}
-      ACME_EMAIL: ${ACME_EMAIL:-}
+      # Domain production. Đổi trong file .env nếu cần (xem .env.example)
+      DOMAIN: "${DOMAIN:-ipos123.vn}"
+      DOMAIN_WWW: "${DOMAIN_WWW:-www.ipos123.vn}"
+      ACME_EMAIL: "${ACME_EMAIL:-}"
     volumes:
       # Persist cert Let's Encrypt qua các lần restart
       - caddy_data:/data

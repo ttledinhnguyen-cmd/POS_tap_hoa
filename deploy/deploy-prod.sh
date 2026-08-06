@@ -28,7 +28,7 @@ if [ -f .env ]; then
   set +a
 fi
 
-DOMAIN="${DOMAIN:-pos.example.com}"
+DOMAIN="${DOMAIN:-ipos123.vn}"
 
 echo "📥 [1/4] Pull code mới..."
 git pull --ff-only

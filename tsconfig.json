@@ -22,5 +22,7 @@
     }
   },
   "include": ["src"],
+  "// exclude": "sw.ts chạy trong ServiceWorkerGlobalScope, xung khắc với lib DOM ở trên. Vite vẫn bundle nó qua vite-plugin-pwa (injectManifest).",
+  "exclude": ["src/sw.ts"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -1,5 +1,9 @@
 # Hướng dẫn deploy lên server
 
+> **Domain production: `ipos123.vn`.** Các file cấu hình (`Caddyfile`,
+> `docker-compose.yml`, `.env.example`, `deploy/nginx.conf`) đã set sẵn domain
+> này làm mặc định. Checklist gắn domain đầy đủ ở `docs/DOMAIN_SETUP.md`.
+
 > **HTTPS là bắt buộc**, không phải tùy chọn. Camera quét mã vạch chỉ chạy
 > trên HTTPS. Nếu server không có HTTPS thì cả app vô dụng.
 
@@ -43,22 +47,25 @@ docker compose version
 
 ### Bước 2: Trỏ DNS
 
-Vào trang quản lý domain (Cloudflare, Tenten, PA Việt Nam, GoDaddy, v.v.) và
-tạo bản ghi A:
+Vào trang quản lý domain của nhà đăng ký `.vn` và tạo **hai** bản ghi A:
 
 ```
-pos.tendomain.com    A    <IP server>
+@      A    <IP server>      # ipos123.vn
+www    A    <IP server>      # www.ipos123.vn → redirect về apex
 ```
+
+Cần cả hai vì Caddy xin cert cho cả apex lẫn www. Thiếu record `www` thì apex
+vẫn chạy nhưng log sẽ đầy lỗi ACME.
 
 Đợi DNS propagate (vài phút đến vài giờ). Kiểm tra:
 
 ```bash
-dig pos.tendomain.com +short
-# Phải trả về đúng IP server
+dig ipos123.vn +short && dig www.ipos123.vn +short
+# Cả hai phải trả về đúng IP server
 ```
 
 **Quan trọng**: Let's Encrypt sẽ verify domain bằng cách gọi lại
-`http://pos.tendomain.com/.well-known/acme-challenge/...`. Nếu DNS chưa trỏ
+`http://ipos123.vn/.well-known/acme-challenge/...`. Nếu DNS chưa trỏ
 đúng thì cấp cert sẽ fail.
 
 ### Bước 3: Clone code lên server
@@ -73,19 +80,34 @@ cd pos-tap-hoa
 (Nếu chưa có git repo, scp file zip lên: `scp pos-tap-hoa.zip user@server:/opt/`
 rồi `unzip pos-tap-hoa.zip` trên server.)
 
-### Bước 4: Cấu hình domain
+### Bước 4: Cấu hình `.env`
 
 ```bash
 cp .env.example .env
 nano .env
 ```
 
-Sửa:
+Điền:
 
 ```
-DOMAIN=pos.tendomain.com
+# Bắt buộc — thiếu là build fail (Vite inline vào bundle lúc build)
+VITE_SUPABASE_URL=https://lidkbryncjlwqquadywn.supabase.co
+VITE_SUPABASE_ANON_KEY=<publishable key từ Supabase Dashboard>
+
+# Hosting
+DOMAIN=ipos123.vn
+DOMAIN_WWW=www.ipos123.vn
 ACME_EMAIL=ban@email.com
+
+# Tùy chọn
+VITE_GOONG_API_KEY=<key nếu dùng bản đồ shops>
+VITE_SUPPORT_ZALO=<số Zalo support>
+VITE_SUPPORT_EMAIL=support@ipos123.vn
 ```
+
+> Các biến `VITE_*` được đọc **lúc build image**, không phải lúc chạy
+> container. Đổi giá trị → phải `docker compose up -d --build` lại, restart
+> không đủ.
 
 ### Bước 5: Khởi động
 
@@ -106,7 +128,7 @@ Khi thấy dòng `serving HTTPS on :443` là đã xong.
 
 ### Bước 6: Test
 
-Mở `https://pos.tendomain.com` trên điện thoại. Cấp quyền camera khi được hỏi.
+Mở `https://ipos123.vn` trên điện thoại. Cấp quyền camera khi được hỏi.
 Quét thử mã vạch trên gói mì Hảo Hảo / chai Coca → sản phẩm phải hiện ra.
 
 ---
@@ -132,7 +154,7 @@ sudo apt install -y nginx certbot python3-certbot-nginx
 # Copy config từ deploy/nginx.conf, sửa server_name và root
 sudo cp deploy/nginx.conf /etc/nginx/sites-available/pos-tap-hoa
 sudo nano /etc/nginx/sites-available/pos-tap-hoa
-# Đổi pos.example.com → domain của bạn
+# server_name đã set sẵn ipos123.vn www.ipos123.vn
 # Đổi /var/www/pos-tap-hoa nếu cần
 
 sudo ln -s /etc/nginx/sites-available/pos-tap-hoa /etc/nginx/sites-enabled/
@@ -140,7 +162,7 @@ sudo nginx -t
 sudo systemctl reload nginx
 
 # Xin cert HTTPS
-sudo certbot --nginx -d pos.tendomain.com
+sudo certbot --nginx -d ipos123.vn
 ```
 
 Certbot sẽ tự sửa file nginx config thêm phần SSL. Cert tự renew 60 ngày/lần.
@@ -202,7 +224,7 @@ Nhưng cũng không cấp thiết vì cert miễn phí, mất thì xin lại đ�
 chưa mở. Check:
 
 ```bash
-dig +short pos.tendomain.com
+dig +short ipos123.vn
 sudo lsof -i :80    # Phải có Caddy/docker, không có gì khác
 sudo ufw status     # Nếu dùng ufw, phải allow 80,443
 ```
@@ -211,7 +233,7 @@ sudo ufw status     # Nếu dùng ufw, phải allow 80,443
 tap vào nút (không tự động mở camera khi load trang). Kiểm tra cert:
 
 ```bash
-curl -I https://pos.tendomain.com
+curl -I https://ipos123.vn
 # Phải trả về 200 OK, không có warning về cert
 ```
 

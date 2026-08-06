@@ -1,8 +1,17 @@
 # Caddy config cho Tạp Hóa POS
-# Domain lấy từ biến môi trường DOMAIN, mặc định pos.example.com
+# Domain production: ipos123.vn (lấy từ biến DOMAIN, xem .env.example)
 # Đổi domain bằng cách set biến trong docker-compose.yml hoặc .env
 
-{$DOMAIN:pos.example.com} {
+# www → apex (301). Bắt buộc giữ MỘT origin duy nhất: dữ liệu bán hàng nằm
+# trong IndexedDB, mà IndexedDB tách theo origin. Nếu user vào lúc www lúc
+# apex thì kho dữ liệu offline bị chia đôi — đơn hàng "biến mất".
+# Yêu cầu: phải có A record cho www, nếu không Caddy xin cert www sẽ fail
+# (apex vẫn chạy bình thường, chỉ log lỗi).
+{$DOMAIN_WWW:www.ipos123.vn} {
+	redir https://{$DOMAIN:ipos123.vn}{uri} permanent
+}
+
+{$DOMAIN:ipos123.vn} {
 	# Auto HTTPS - Caddy tự xin Let's Encrypt cert
 	# Email cho Let's Encrypt: set qua biến ACME_EMAIL nếu muốn
 	# Bỏ comment dòng dưới nếu cần

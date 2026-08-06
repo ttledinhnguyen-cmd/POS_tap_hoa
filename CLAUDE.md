@@ -170,7 +170,8 @@ src/
 - [ ] Đăng nhập + role guard (cashier/owner)
 - [ ] Backend Supabase + đồng bộ
 - [ ] In hóa đơn nhiệt 58mm qua Bluetooth (escpos-buffer)
-- [ ] PWA install + icon đầy đủ
+- [x] PWA install + icon đầy đủ (injectManifest + icon 192/512/apple-touch,
+      2026-08-06 — icon hiện là placeholder theo design token, thay được)
 
 ### Giai đoạn 2 — Tuân thủ thuế
 - [ ] Tích hợp HĐĐT từ máy tính tiền (MISA meInvoice API)
@@ -223,6 +224,36 @@ src/
 
 ## 11. Hosting & deployment
 
+**Domain production: `ipos123.vn`** (mua 2026-08-06, NS matbao.vn). DNS apex +
+www đã trỏ về `103.68.68.146`. `www` → 301 về apex: **KHÔNG chạy 2 origin** vì
+IndexedDB tách theo origin, user vào lúc www lúc apex sẽ thấy đơn hàng offline
+"biến mất".
+
+### Hạ tầng THẬT — khác với mô tả Docker/Caddy bên dưới
+
+`103.68.68.146` là **Windows Server 2022 + IIS**, không phải Ubuntu. Đây cũng
+chính là máy đang chứa repo này (`D:\Hosting\Hao's Projects\...`) — dev và
+production cùng một máy. IIS đang giữ port 80/443 để phục vụ nhiều site khác
+(`bdcbanking.com`, `laitot.com`, `themarisvip.com`, `alaw.vn`…).
+
+**KHÔNG cài Docker/Caddy lên máy này** — sẽ tranh port 80/443 và làm sập các
+site đang chạy. Đường deploy đúng:
+
+- Site root: `D:\Hosting\_iis_sites\ipos123.vn` (theo quy ước sẵn có của server)
+- `deploy/web.config` — bản dịch Caddyfile sang IIS: SPA fallback, cache rules,
+  security headers, MIME `.webmanifest`, ACME challenge passthrough
+- `deploy/deploy-iis.ps1` — build + robocopy, chạy bằng user thường
+- `deploy/setup-iis-site.ps1` — tạo site/binding, **cần Administrator**, chạy 1 lần
+- Cert: Certify The Web (GUI, đang quản lý cert các domain khác) hoặc `C:\win-acme`
+
+Checklist đầy đủ + trạng thái từng bước: `docs/DOMAIN_SETUP.md`.
+
+`Dockerfile` / `Caddyfile` / `docker-compose.yml` / `HOSTING.md` giữ nguyên
+(đã cập nhật domain) cho trường hợp sau này tách sang VPS Linux riêng — hiện
+KHÔNG dùng.
+
+### Stack Docker/Caddy (chưa dùng — dành cho VPS Linux tương lai)
+
 Self-host trên VPS. Stack đã chốt:
 
 - **Caddy 2** làm reverse proxy + serve static. Tự động Let's Encrypt cert.
@@ -230,11 +261,18 @@ Self-host trên VPS. Stack đã chốt:
   runtime caddy:2-alpine).
 - **docker-compose.yml** có sẵn, expose 80/443/443UDP (HTTP/3).
 - File cấu hình:
-  - `Caddyfile` — SPA fallback, cache strategy, security headers
+  - `Caddyfile` — SPA fallback, cache strategy, security headers, www redirect
   - `deploy/nginx.conf` — alternative cho ai dùng nginx có sẵn
-  - `.env.example` — template cho `DOMAIN` và `ACME_EMAIL`
+  - `.env.example` — template cho `VITE_*` (build) + `DOMAIN`/`ACME_EMAIL`
 
 Deploy 1 dòng: `docker compose up -d --build`. Update: `./deploy/deploy.sh`.
+
+**Biến `VITE_*` là BUILD-TIME, không phải runtime.** `.dockerignore` loại
+`.env`/`.env.local` (đúng), nên Dockerfile nhận chúng qua `ARG` và
+docker-compose truyền vào qua `build.args` đọc từ `.env` trên server. Đổi giá
+trị → phải `--build` lại, `docker compose restart` KHÔNG có tác dụng. Dockerfile
+fail sớm nếu thiếu `VITE_SUPABASE_URL`/`VITE_SUPABASE_ANON_KEY` — trước đây
+build vẫn pass nhưng ra app trắng màn hình (supabase.ts throw lúc import).
 
 **HTTPS là bắt buộc** vì camera API yêu cầu. Khi sửa hosting, không bao giờ
 release config HTTP-only.
@@ -336,13 +374,31 @@ Code added trong `src/`:
 3. **`config.toml` v2.96 không nhận `verify_jwt` ở top level `[functions]`**.
    Phải declare per-function: `[functions.<name>]\nverify_jwt = false`.
 
-4. **PWA workbox-build có bug với path chứa apostrophe**. Workaround:
-   `disable: process.cwd().includes("'")` trong VitePWA. Deploy Linux không
-   ảnh hưởng (path container không có apostrophe).
+4. **PWA workbox-build có bug với path chứa apostrophe** — ĐÃ FIX 2026-08-06.
+   ~~Workaround `disable: process.cwd().includes("'")`~~ và ~~"deploy Linux
+   không ảnh hưởng"~~ đều SAI: production build ngay trên Windows server tại
+   `D:\Hosting\Hao's Projects\...` nên bản live suốt thời gian đó **không có
+   `sw.js`** → mất offline, mất "Thêm vào màn hình chính", mất auto-update.
+   Junction path không dấu nháy KHÔNG cứu được (vite-plugin-pwa resolve
+   realpath). Fix: chuyển sang strategy **`injectManifest`** + `src/sw.ts` tự
+   viết. **ĐỪNG đổi ngược về `generateSW`** — lỗi sẽ quay lại và im lặng
+   (build vẫn pass nếu ai đó thêm lại `disable`). Chi tiết ở
+   `docs/DOMAIN_SETUP.md` mục "PWA — đã fix".
 
 5. **Access token Supabase (`sbp_*`) dùng được cho `supabase login --token`**,
    sau đó các lệnh CLI (`db push`, `db query --linked`, `link`) chạy
    non-interactive. Ưu tiên cách này khi automation.
+
+6. **File `.ps1` có tiếng Việt BẮT BUỘC lưu UTF-8 CÓ BOM.** Windows PowerShell
+   5.1 (cửa sổ "Run as Administrator" mặc định của Windows) đọc `.ps1` không
+   BOM theo ANSI → `—` thành `â€"`, mà chuỗi đó chứa dấu `"` nên cắt đứt string
+   literal → `Unexpected token`. PowerShell 7 (`pwsh`) mặc định UTF-8 nên
+   **không lộ lỗi khi test** — phải parse-check bằng `powershell.exe` mới thấy:
+   ```powershell
+   powershell.exe -NoProfile -Command "[void][System.Management.Automation.Language.Parser]::ParseFile('<file>',[ref]$null,[ref]$e); $e"
+   ```
+   Chỉ áp dụng cho `.ps1`. File `.sh` (`deploy-prod.sh`) thì **KHÔNG** được có
+   BOM — bash sẽ vỡ.
 
 ## Sprint 2 decisions chốt (2026-04-30)
 
