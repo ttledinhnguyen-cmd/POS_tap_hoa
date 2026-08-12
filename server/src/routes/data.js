@@ -17,6 +17,7 @@ const READABLE = {
   stock_takes:         { filters: ["org_id", "id"],      order: "take_date desc" },
   suppliers:           { filters: ["org_id", "id"],      order: "name asc" },
   supplier_payments:   { filters: ["org_id", "supplier_id"], order: "payment_date desc" },
+  goods_returns:       { filters: ["org_id", "supplier_id"], order: "return_date desc" },
 
   // Ba bảng chi tiết dưới đây cho lọc theo org_id qua JOIN với bảng cha.
   // Không có join thì client phải bắn một request cho MỖI đơn hàng khi kéo về
@@ -31,6 +32,11 @@ const READABLE = {
     filters: ["receipt_id"],
     order: null,
     parent: { table: "goods_receipts", fk: "receipt_id" },
+  },
+  goods_return_items: {
+    filters: ["return_id"],
+    order: null,
+    parent: { table: "goods_returns", fk: "return_id" },
   },
   stock_take_items: {
     filters: ["stock_take_id"],
@@ -94,6 +100,8 @@ const CALLABLE_RPC = new Set([
   "record_supplier_payment",
   "supplier_debt",
   "suggest_reorder",
+  "create_goods_return",
+  "set_supplier_schedule",
 ]);
 
 // Thứ tự tham số phải khớp CHÍNH XÁC chữ ký function trong Postgres.
@@ -127,12 +135,14 @@ const RPC_ARGS = {
   record_supplier_payment:  ["p_supplier_id", "p_amount", "p_method", "p_notes", "p_date"],
   supplier_debt:            ["p_org_id"],
   suggest_reorder:          ["p_org_id", "p_days", "p_horizon"],
+  create_goods_return:      ["p_return", "p_items"],
+  set_supplier_schedule:    ["p_supplier_id", "p_weekdays", "p_rep_name", "p_rep_phone"],
   admin_create_shop:        ["p_org_name", "p_owner_email", "p_tax_code", "p_address", "p_address_full", "p_phone", "p_latitude", "p_longitude", "p_trial_days", "p_monthly_price"],
 };
 
 // jsonb phải gửi dạng chuỗi JSON, không để node-postgres tự suy kiểu — nếu để
 // nó tự, mảng JS sẽ thành mảng Postgres chứ không phải jsonb và RPC lỗi kiểu.
-const JSONB_ARGS = new Set(["p_order", "p_items", "p_receipt"]);
+const JSONB_ARGS = new Set(["p_order", "p_items", "p_receipt", "p_return"]);
 
 // Function trả `returns table (...)` phải gọi bằng `select * from f(...)`.
 // Gọi kiểu `select f(...)` sẽ ra một composite record bị serialize thành chuỗi

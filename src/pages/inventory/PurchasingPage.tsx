@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowLeft, Loader2, PackagePlus, Phone, Wallet } from "lucide-react";
+import { ArrowLeft, CalendarDays, Loader2, PackagePlus, Phone, Undo2, Wallet } from "lucide-react";
 import { api } from "@/integrations/api";
 import { useAuthStore } from "@/stores/auth";
 import { Button } from "@/components/ui/Button";
@@ -38,9 +38,22 @@ interface DebtRow {
   phone: string | null;
   total_purchased: number;
   total_paid: number;
+  total_returned: number;
   balance: number;
   last_purchase_at: string | null;
   receipts_count: number;
+  /** Thứ NVBH ghé theo ISO: 1=T2 … 7=CN */
+  visit_weekdays: number[] | null;
+  sales_rep_name: string | null;
+  sales_rep_phone: string | null;
+}
+
+const WEEKDAY_LABEL = ['', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+
+/** Thứ hôm nay theo ISO, khớp quy ước visit_weekdays. */
+function todayIso(): number {
+  const d = new Date().getDay(); // 0=CN
+  return d === 0 ? 7 : d;
 }
 
 // Cửa sổ tính tốc độ bán và số ngày muốn hàng đủ bán.
@@ -60,6 +73,12 @@ export function PurchasingPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payNote, setPayNote] = useState("");
   const [paying, setPaying] = useState(false);
+
+  const [schedTarget, setSchedTarget] = useState<DebtRow | null>(null);
+  const [schedDays, setSchedDays] = useState<number[]>([]);
+  const [schedRep, setSchedRep] = useState('');
+  const [schedPhone, setSchedPhone] = useState('');
+  const [savingSched, setSavingSched] = useState(false);
 
   const load = useCallback(async () => {
     if (!orgId) return;
@@ -111,7 +130,31 @@ export function PurchasingPage() {
     }
   }
 
+  async function saveSchedule() {
+    if (!schedTarget) return;
+    setSavingSched(true);
+    try {
+      await api.rpc('set_supplier_schedule', {
+        p_supplier_id: schedTarget.supplier_id,
+        p_weekdays: schedDays.length ? schedDays : null,
+        p_rep_name: schedRep.trim() || null,
+        p_rep_phone: schedPhone.trim() || null,
+      });
+      vibrate(15);
+      setSchedTarget(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Lưu lịch thất bại');
+    } finally {
+      setSavingSched(false);
+    }
+  }
+
   const loading = reorder === null || debt === null;
+  const today = todayIso();
+  const visitingToday = (debt ?? []).filter((d) =>
+    d.visit_weekdays?.includes(today),
+  );
   const totalDebt = (debt ?? [])
     .filter((d) => d.balance > 0)
     .reduce((s, d) => s + d.balance, 0);
@@ -126,7 +169,14 @@ export function PurchasingPage() {
         >
           <ArrowLeft className="w-5 h-5" />
         </Link>
-        <h1 className="text-lg font-semibold">Mua hàng</h1>
+        <h1 className="text-lg font-semibold flex-1">Mua hàng</h1>
+        <Link
+          to="/inventory/return"
+          className="flex items-center gap-1.5 h-9 px-3 rounded-md border border-line text-sm text-ink-muted press"
+        >
+          <Undo2 className="w-4 h-4" />
+          Trả hàng
+        </Link>
       </header>
 
       <div className="flex border-b border-line bg-bg-card">
@@ -168,6 +218,17 @@ export function PurchasingPage() {
         <p className="px-4 py-2 text-sm text-danger bg-danger/5" role="alert">
           {error}
         </p>
+      )}
+
+      {/* Biết trước hôm nay ai ghé thì chủ tiệm chuẩn bị số, khỏi bị hỏi bất ngờ */}
+      {visitingToday.length > 0 && (
+        <div className="px-4 py-2.5 bg-primary-50 border-b border-line flex items-start gap-2">
+          <CalendarDays className="w-4 h-4 text-primary-700 mt-0.5 shrink-0" />
+          <p className="text-sm text-primary-800">
+            <span className="font-medium">Hôm nay ghé:</span>{" "}
+            {visitingToday.map((v) => v.supplier_name).join(", ")}
+          </p>
+        </div>
       )}
 
       {loading ? (
@@ -247,8 +308,20 @@ export function PurchasingPage() {
                       <p className="text-xs text-ink-muted mt-0.5 tabular-nums">
                         {d.receipts_count} phiếu · đã trả{" "}
                         {formatVND(d.total_paid)}đ
-                        {d.last_purchase_at && ` · nhập ${d.last_purchase_at}`}
+                        {d.total_returned > 0 &&
+                          ` · trả hàng ${formatVND(d.total_returned)}đ`}
                       </p>
+                      {d.visit_weekdays && d.visit_weekdays.length > 0 && (
+                        <p className="text-xs text-primary-700 mt-0.5">
+                          Ghé{" "}
+                          {d.visit_weekdays
+                            .slice()
+                            .sort((a, b) => a - b)
+                            .map((w) => WEEKDAY_LABEL[w])
+                            .join(", ")}
+                          {d.sales_rep_name && ` · ${d.sales_rep_name}`}
+                        </p>
+                      )}
                       {d.phone && (
                         <a
                           href={`tel:${d.phone}`}
@@ -279,15 +352,29 @@ export function PurchasingPage() {
                             ? "trả dư"
                             : "đã xong"}
                       </p>
-                      <button
-                        onClick={() => {
-                          setPayTarget(d);
-                          setPayAmount(d.balance > 0 ? String(d.balance) : "");
-                        }}
-                        className="mt-1.5 px-3 h-9 rounded border border-line text-sm press"
-                      >
-                        Trả tiền
-                      </button>
+                      <div className="flex gap-1.5 mt-1.5 justify-end">
+                        <button
+                          onClick={() => {
+                            setSchedTarget(d);
+                            setSchedDays(d.visit_weekdays ?? []);
+                            setSchedRep(d.sales_rep_name ?? "");
+                            setSchedPhone(d.sales_rep_phone ?? "");
+                          }}
+                          aria-label="Đặt lịch NVBH ghé"
+                          className="px-2.5 h-9 rounded border border-line text-ink-muted press"
+                        >
+                          <CalendarDays className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => {
+                            setPayTarget(d);
+                            setPayAmount(d.balance > 0 ? String(d.balance) : "");
+                          }}
+                          className="px-3 h-9 rounded border border-line text-sm press"
+                        >
+                          Trả tiền
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </li>
@@ -339,6 +426,81 @@ export function PurchasingPage() {
           </Button>
         </div>
       </Sheet>
+
+      <Sheet
+        open={schedTarget !== null}
+        onClose={() => setSchedTarget(null)}
+        title={`Lịch ghé — ${schedTarget?.supplier_name ?? ""}`}
+      >
+        <div className="px-5 pb-5 flex flex-col gap-4">
+          <div>
+            <p className="text-sm font-medium mb-2">Thứ nào NVBH ghé?</p>
+            <WeekdayPicker value={schedDays} onChange={setSchedDays} />
+            <p className="text-xs text-ink-muted mt-1.5">
+              Bỏ chọn hết nếu không có lịch cố định.
+            </p>
+          </div>
+          <FormField label="Tên nhân viên bán hàng" optional>
+            <input
+              type="text"
+              value={schedRep}
+              onChange={(e) => setSchedRep(e.target.value)}
+              placeholder="Anh Tuấn"
+            />
+          </FormField>
+          <FormField label="SĐT nhân viên" optional>
+            <input
+              type="tel"
+              inputMode="tel"
+              value={schedPhone}
+              onChange={(e) => setSchedPhone(e.target.value)}
+              placeholder="0901234567"
+            />
+          </FormField>
+          <Button
+            onClick={saveSchedule}
+            disabled={savingSched}
+            className="w-full"
+          >
+            {savingSched ? "Đang lưu…" : "Lưu lịch"}
+          </Button>
+        </div>
+      </Sheet>
+    </div>
+  );
+}
+
+/** Chọn thứ NVBH ghé. Giá trị theo ISO 1=T2 … 7=CN, khớp thẳng với DB. */
+function WeekdayPicker({
+  value,
+  onChange,
+}: {
+  value: number[];
+  onChange: (next: number[]) => void;
+}) {
+  return (
+    <div className="flex gap-1.5">
+      {[1, 2, 3, 4, 5, 6, 7].map((w) => {
+        const on = value.includes(w);
+        return (
+          <button
+            key={w}
+            type="button"
+            onClick={() =>
+              onChange(on ? value.filter((x) => x !== w) : [...value, w])
+            }
+            aria-pressed={on}
+            className={cn(
+              "flex-1 h-11 rounded-md border text-sm font-medium press",
+              on
+                ? "border-primary-500 bg-primary-50 text-primary-700"
+                : "border-line text-ink-muted",
+            )}
+          >
+            {WEEKDAY_LABEL[w]}
+          </button>
+        );
+      })}
     </div>
   );
 }

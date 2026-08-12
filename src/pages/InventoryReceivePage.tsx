@@ -128,6 +128,9 @@ export function InventoryReceivePage() {
         quantity: 1,
         priceBuy: product.priceCost,
         currentStock: product.stock,
+        // Nhớ quy cách đóng gói của lần nhập trước để khỏi gõ lại
+        packSize: product.packSize,
+        packUnit: product.packUnit,
       };
       beep(880, 80);
       vibrate(40);
@@ -171,14 +174,9 @@ export function InventoryReceivePage() {
   }
 
   // ----- Item updates -----
-  function updateQty(productId: string, qty: number) {
+  function updateItem(productId: string, patch: Partial<ReceiveItemInput>) {
     setItems((curr) =>
-      curr.map((it) => (it.productId === productId ? { ...it, quantity: qty } : it)),
-    );
-  }
-  function updatePrice(productId: string, price: number) {
-    setItems((curr) =>
-      curr.map((it) => (it.productId === productId ? { ...it, priceBuy: price } : it)),
+      curr.map((it) => (it.productId === productId ? { ...it, ...patch } : it)),
     );
   }
   function removeItem(productId: string) {
@@ -187,7 +185,14 @@ export function InventoryReceivePage() {
 
   // ----- Total -----
   const totalCost = useMemo(
-    () => items.reduce((sum, it) => sum + Math.round(it.priceBuy * it.quantity), 0),
+    () =>
+      items.reduce((sum, it) => {
+        if (it.isGift) return sum; // hàng tặng không tính tiền
+        if (it.packQty !== undefined) {
+          return sum + Math.round((it.packPrice ?? 0) * it.packQty);
+        }
+        return sum + Math.round(it.priceBuy * it.quantity);
+      }, 0),
     [items],
   );
   const itemCount = items.length;
@@ -200,7 +205,9 @@ export function InventoryReceivePage() {
     setSubmitError(null);
     try {
       // Filter out items với qty <= 0 hoặc price < 0
-      const validItems = items.filter((it) => it.quantity > 0 && it.priceBuy >= 0);
+      const validItems = items.filter((it) =>
+        it.packQty !== undefined ? it.packQty > 0 : it.quantity > 0,
+      );
       if (validItems.length === 0) {
         setSubmitError("Không có dòng hợp lệ (số lượng phải > 0)");
         setSubmitting(false);
@@ -354,8 +361,7 @@ export function InventoryReceivePage() {
                 <ReceiveItemRow
                   key={it.productId}
                   item={it}
-                  onChangeQuantity={(qty) => updateQty(it.productId, qty)}
-                  onChangePriceBuy={(price) => updatePrice(it.productId, price)}
+                  onChange={(patch) => updateItem(it.productId, patch)}
                   onRemove={() => removeItem(it.productId)}
                   autoFocus={lastAddedId === it.productId}
                   costVariance={variances.get(it.productId) ?? null}

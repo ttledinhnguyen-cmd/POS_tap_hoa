@@ -54,6 +54,11 @@ const InventoryReceivePage = lazy(() =>
 const InventoryPage = lazy(() =>
   import("@/pages/InventoryPage").then((m) => ({ default: m.InventoryPage })),
 );
+const GoodsReturnPage = lazy(() =>
+  import("@/pages/inventory/GoodsReturnPage").then((m) => ({
+    default: m.GoodsReturnPage,
+  })),
+);
 const PurchasingPage = lazy(() =>
   import("@/pages/inventory/PurchasingPage").then((m) => ({
     default: m.PurchasingPage,
@@ -221,6 +226,16 @@ export default function App() {
               <AuthGuard>
                 <AppLayout>
                   <InventoryPage />
+                </AppLayout>
+              </AuthGuard>
+            }
+          />
+          <Route
+            path="/inventory/return"
+            element={
+              <AuthGuard>
+                <AppLayout>
+                  <GoodsReturnPage />
                 </AppLayout>
               </AuthGuard>
             }
