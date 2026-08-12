@@ -29,6 +29,8 @@
 -- =============================================================================
 
 create extension if not exists pgcrypto;
+-- unaccent: khớp tên nhà cung cấp bỏ dấu tiếng Việt (xem vn_norm)
+create extension if not exists unaccent;
 
 -- =============================================================================
 -- Nền tảng: thay thế các tiện ích của Supabase

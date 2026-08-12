@@ -15,6 +15,8 @@ const READABLE = {
   orders:              { filters: ["org_id"],            order: "created_at desc" },
   goods_receipts:      { filters: ["org_id"],            order: "receipt_date desc" },
   stock_takes:         { filters: ["org_id", "id"],      order: "take_date desc" },
+  suppliers:           { filters: ["org_id", "id"],      order: "name asc" },
+  supplier_payments:   { filters: ["org_id", "supplier_id"], order: "payment_date desc" },
 
   // Ba bảng chi tiết dưới đây cho lọc theo org_id qua JOIN với bảng cha.
   // Không có join thì client phải bắn một request cho MỖI đơn hàng khi kéo về
@@ -86,6 +88,12 @@ const CALLABLE_RPC = new Set([
   "admin_list_shops",
   "admin_dashboard_metrics",
   "admin_create_shop",
+  // Nhà cung cấp, công nợ, gợi ý đặt hàng
+  "upsert_supplier",
+  "archive_supplier",
+  "record_supplier_payment",
+  "supplier_debt",
+  "suggest_reorder",
 ]);
 
 // Thứ tự tham số phải khớp CHÍNH XÁC chữ ký function trong Postgres.
@@ -114,6 +122,11 @@ const RPC_ARGS = {
   unsuspend_shop:           ["p_org_id"],
   admin_list_shops:         [],
   admin_dashboard_metrics:  [],
+  upsert_supplier:          ["p_org_id", "p_name", "p_id", "p_phone", "p_tax_code", "p_address", "p_notes"],
+  archive_supplier:         ["p_id"],
+  record_supplier_payment:  ["p_supplier_id", "p_amount", "p_method", "p_notes", "p_date"],
+  supplier_debt:            ["p_org_id"],
+  suggest_reorder:          ["p_org_id", "p_days", "p_horizon"],
   admin_create_shop:        ["p_org_name", "p_owner_email", "p_tax_code", "p_address", "p_address_full", "p_phone", "p_latitude", "p_longitude", "p_trial_days", "p_monthly_price"],
 };
 
@@ -124,7 +137,7 @@ const JSONB_ARGS = new Set(["p_order", "p_items", "p_receipt"]);
 // Function trả `returns table (...)` phải gọi bằng `select * from f(...)`.
 // Gọi kiểu `select f(...)` sẽ ra một composite record bị serialize thành chuỗi
 // dạng "(uuid,email,owner,...)" — client không parse được.
-const SETOF_RPC = new Set(["get_org_members", "admin_list_shops"]);
+const SETOF_RPC = new Set(["get_org_members", "admin_list_shops", "supplier_debt", "suggest_reorder"]);
 
 export default async function dataRoutes(app) {
   // Mọi thứ dưới đây bắt buộc đăng nhập

@@ -53,6 +53,15 @@ begin
   insert into public.memberships (user_id, org_id, role)
   values (v_user_id, v_org_id, 'owner');
 
+  -- Tiệm nào cũng phải có subscription, kể cả tiệm tự tạo qua onboarding.
+  -- Trước đây chỉ admin_create_shop mới tạo dòng này, nên tiệm tạo bằng đường
+  -- onboarding không có subscription: trang quản trị hiện toàn dấu gạch, và
+  -- record_payment ném "Subscription not found". Nhãn "Trial" trên danh sách
+  -- shop là ảo — do coalesce(status,'trial') bịa ra khi thiếu dòng.
+  insert into public.subscriptions (org_id, status, monthly_price, trial_until_date)
+  values (v_org_id, 'trial', 199000, current_date + interval '30 days')
+  on conflict (org_id) do nothing;
+
   return v_org_id;
 end;
 $$;
