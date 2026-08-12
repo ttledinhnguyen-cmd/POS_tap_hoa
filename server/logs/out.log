@@ -1,0 +1,7 @@
+2026-08-12T22:06:30: {"level":30,"time":1786547190980,"pid":10988,"hostname":"WIN-2QE5SB304AP","msg":"Server listening at http://127.0.0.1:8210"}
+2026-08-12T22:07:17: {"level":30,"time":1786547237023,"pid":10988,"hostname":"WIN-2QE5SB304AP","reqId":"req-1","req":{"method":"GET","url":"/api/health","host":"ipos123.vn","remoteAddress":"103.68.68.146:58730","remotePort":58731},"msg":"incoming request"}
+2026-08-12T22:07:17: {"level":30,"time":1786547237216,"pid":10988,"hostname":"WIN-2QE5SB304AP","reqId":"req-1","res":{"statusCode":200},"responseTime":193.09360000000015,"msg":"request completed"}
+2026-08-12T22:07:17: {"level":30,"time":1786547237631,"pid":10988,"hostname":"WIN-2QE5SB304AP","reqId":"req-2","req":{"method":"POST","url":"/api/auth/login","host":"ipos123.vn","remoteAddress":"103.68.68.146:58740","remotePort":58731},"msg":"incoming request"}
+2026-08-12T22:07:17: {"level":30,"time":1786547237723,"pid":10988,"hostname":"WIN-2QE5SB304AP","reqId":"req-2","res":{"statusCode":200},"responseTime":92.24909999999363,"msg":"request completed"}
+2026-08-12T22:11:03: {"level":30,"time":1786547463874,"pid":10988,"hostname":"WIN-2QE5SB304AP","reqId":"req-3","req":{"method":"GET","url":"/api/health","host":"127.0.0.1:8210","remoteAddress":"127.0.0.1","remotePort":59249},"msg":"incoming request"}
+2026-08-12T22:11:03: {"level":30,"time":1786547463960,"pid":10988,"hostname":"WIN-2QE5SB304AP","reqId":"req-3","res":{"statusCode":200},"responseTime":86.04550000000745,"msg":"request completed"}

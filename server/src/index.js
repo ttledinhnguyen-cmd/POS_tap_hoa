@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import { pool, closePool } from "./db.js";
 import { verifyAccessToken } from "./auth.js";
 import authRoutes from "./routes/auth.js";
+import dataRoutes from "./routes/data.js";
 
 const PORT = Number(process.env.PORT ?? 8210);
 const isProd = process.env.NODE_ENV === "production";
@@ -53,6 +54,16 @@ app.setErrorHandler((err, req, reply) => {
       message: msg,
     });
   }
+  // 42501 = insufficient_privilege: RLS WITH CHECK chặn ghi sang tiệm khác.
+  // Phải là 403 chứ không phải 500 — outbox worker của client retry theo backoff
+  // với mọi lỗi, nên trả 500 cho một lỗi phân quyền vĩnh viễn thì nó sẽ thử lại
+  // 6 lần rồi mới chịu bỏ, tốn công vô ích.
+  if (err.code === "42501") {
+    return reply.code(403).send({
+      error: "forbidden",
+      message: "Không có quyền ghi dữ liệu cho tiệm này",
+    });
+  }
   if (err.code === "23505") {
     return reply.code(409).send({ error: "conflict", message: "Dữ liệu đã tồn tại" });
   }
@@ -76,6 +87,7 @@ app.get("/api/health", async () => {
 });
 
 await app.register(authRoutes, { prefix: "/api/auth" });
+await app.register(dataRoutes, { prefix: "/api" });
 
 // -----------------------------------------------------------------------------
 // Khởi động
