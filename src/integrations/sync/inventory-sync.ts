@@ -173,13 +173,17 @@ class InventorySync {
           supplier_name: receipt.supplierName ?? null,
           supplier_phone: receipt.supplierPhone ?? null,
           supplier_tax_code: receipt.supplierTaxCode ?? null,
+          supplier_id: input.supplierId ?? null,
           receipt_date: receipt.receiptDate,
           invoice_no: receipt.invoiceNo ?? null,
           total_cost: receipt.totalCost,
           notes: receipt.notes ?? null,
+          due_date: input.dueDate ?? null,
           created_at: new Date(receipt.createdAt).toISOString(),
         };
-        const itemsPayload = receiptItems.map((it) => ({
+        // Gửi kèm cách gõ gốc (mấy thùng, giá mỗi thùng) để SERVER tự quy đổi.
+        // Không tin con số client tính sẵn — hai bên lệch nhau là sai tồn kho.
+        const itemsPayload = receiptItems.map((it, i) => ({
           id: it.id,
           product_id: it.productId ?? null,
           product_name: it.productName,
@@ -187,6 +191,11 @@ class InventorySync {
           quantity: it.quantity,
           price_buy: it.priceBuy,
           line_total: it.lineTotal,
+          pack_qty: items[i]?.packQty ?? null,
+          pack_size: items[i]?.packSize ?? null,
+          pack_unit: items[i]?.packUnit ?? null,
+          pack_price: items[i]?.packPrice ?? null,
+          is_gift: items[i]?.isGift ?? false,
         }));
 
         const job: OutboxJob = {

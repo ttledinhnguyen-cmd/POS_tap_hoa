@@ -20,6 +20,8 @@ interface ProductRow {
   category: string | null;
   image_url: string | null;
   is_active: boolean;
+  pack_size: number | null;
+  pack_unit: string | null;
   created_at: string; // ISO timestamptz
   updated_at: string;
 }
@@ -41,14 +43,16 @@ function fromRow(row: ProductRow): Product {
     category: row.category ?? undefined,
     imageUrl: row.image_url ?? undefined,
     isActive: row.is_active,
+    packSize: row.pack_size ?? undefined,
+    packUnit: row.pack_unit ?? undefined,
     createdAt: new Date(row.created_at).getTime(),
     updatedAt: new Date(row.updated_at).getTime(),
   };
 }
 
 /**
- * Convert: Dexie Product → Supabase row payload (snake_case + percent).
- * KHÔNG include createdAt/updatedAt — Supabase tự set.
+ * Convert: Dexie Product → payload gửi API (snake_case + thuế phần trăm).
+ * KHÔNG kèm created_at/updated_at — trigger ở DB tự set.
  */
 function toRow(p: Product): Omit<ProductRow, "created_at" | "updated_at"> {
   return {
@@ -64,6 +68,8 @@ function toRow(p: Product): Omit<ProductRow, "created_at" | "updated_at"> {
     category: p.category ?? null,
     image_url: p.imageUrl ?? null,
     is_active: p.isActive,
+    pack_size: p.packSize ?? null,
+    pack_unit: p.packUnit ?? null,
   };
 }
 
@@ -81,6 +87,8 @@ export interface ProductInput {
   taxRate: number;
   category?: string;
   imageUrl?: string;
+  packSize?: number;
+  packUnit?: string;
 }
 
 class ProductsSync {
@@ -181,6 +189,8 @@ class ProductsSync {
       taxRate: input.taxRate,
       category: input.category?.trim() || undefined,
       imageUrl: input.imageUrl?.trim() || undefined,
+      packSize: input.packSize,
+      packUnit: input.packUnit?.trim() || undefined,
       isActive: true,
       createdAt: now,
       updatedAt: now,

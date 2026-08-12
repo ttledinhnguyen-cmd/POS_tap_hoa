@@ -10,6 +10,7 @@ import { ReceiveItemRow } from "@/components/inventory/ReceiveItemRow";
 import { AddProductPrompt } from "@/components/inventory/AddProductPrompt";
 import { ProductPicker } from "@/components/inventory/ProductPicker";
 import { ProductFormModal } from "@/components/products/ProductFormModal";
+import { api } from "@/integrations/api";
 import { inventorySync } from "@/integrations/sync/inventory-sync";
 import { outboxWorker } from "@/integrations/sync/outbox-worker";
 import { formatVND } from "@/lib/format";
@@ -205,9 +206,33 @@ export function InventoryReceivePage() {
         setSubmitting(false);
         return;
       }
+      // Ghi tên NCC vào danh mục để theo dõi công nợ. Server khớp bỏ dấu +
+      // bỏ hoa thường nên gõ "npp masan" hôm nay và "NPP Masan" hôm sau vẫn ra
+      // cùng một nhà cung cấp, không tách công nợ làm đôi.
+      //
+      // Lỗi ở bước này KHÔNG được chặn việc nhập kho: mất mạng thì phiếu vẫn
+      // phải lưu được vào Dexie rồi đồng bộ sau, đó là cả điểm của offline-first.
+      let supplierId: string | undefined;
+      if (supplierName.trim()) {
+        try {
+          supplierId = await api.rpc<string>("upsert_supplier", {
+            p_org_id: orgId,
+            p_name: supplierName.trim(),
+            p_id: null,
+            p_phone: supplierPhone.trim() || null,
+            p_tax_code: supplierTaxCode.trim() || null,
+            p_address: null,
+            p_notes: null,
+          });
+        } catch {
+          // Bỏ qua — phiếu vẫn lưu, chỉ là chưa gắn được vào công nợ
+        }
+      }
+
       await inventorySync.createReceipt(
         orgId,
         {
+          supplierId,
           supplierName: supplierName.trim() || undefined,
           supplierPhone: supplierPhone.trim() || undefined,
           supplierTaxCode: supplierTaxCode.trim() || undefined,

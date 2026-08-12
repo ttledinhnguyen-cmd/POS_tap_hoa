@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useLiveQuery } from "dexie-react-hooks";
-import { ClipboardCheck, Package2, Plus, Search } from "lucide-react";
+import { ClipboardCheck, Package2, Plus, Search, ShoppingCart } from "lucide-react";
 import { db } from "@/lib/db";
 import { useAuthStore } from "@/stores/auth";
 import { Button } from "@/components/ui/Button";
@@ -161,6 +161,14 @@ export function InventoryPage() {
               <ClipboardCheck className="w-5 h-5" />
               <span className="hidden md:inline">Kiểm kê mới</span>
               <span className="md:hidden">KK</span>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => navigate("/inventory/purchasing")}
+            >
+              <ShoppingCart className="w-5 h-5" />
+              <span className="hidden md:inline">Mua hàng</span>
+              <span className="md:hidden">Mua</span>
             </Button>
             <Button
               variant="primary"

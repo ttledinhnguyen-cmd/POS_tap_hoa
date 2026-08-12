@@ -11,7 +11,16 @@ export interface Product {
   category?: string;
   imageUrl?: string; // Sprint 7 sẽ thêm UI upload
   isActive: boolean; // soft delete: false = ngừng bán
-  expiryDate?: string; // YYYY-MM-DD — client-only, không sync Supabase Phase 4
+  expiryDate?: string; // YYYY-MM-DD — client-only, không sync server
+
+  /**
+   * Quy đổi nhập/bán: số đơn vị bán trong một đơn vị nhập.
+   * VD thùng Coca 24 lon → packSize 24, packUnit "thùng".
+   * Bỏ trống = nhập và bán cùng đơn vị (gạo, trứng lẻ).
+   */
+  packSize?: number;
+  packUnit?: string;
+
   createdAt: number;
   updatedAt: number;
 }
@@ -117,12 +126,19 @@ export interface GoodsReceiptItem {
  * Input cho UI form Nhập kho — chưa có id/timestamps/totalCost (auto-calc).
  */
 export interface ReceiveInput {
+  /**
+   * Nhà cung cấp trong danh mục. Tên vẫn lưu kèm dạng chữ làm ảnh chụp, để
+   * đổi tên NCC về sau không làm sai lệch phiếu cũ.
+   */
+  supplierId?: string;
   supplierName?: string;
   supplierPhone?: string;
   supplierTaxCode?: string;
   receiptDate: string; // YYYY-MM-DD
   invoiceNo?: string;
   notes?: string;
+  /** Hẹn ngày trả tiền — hàng gối đầu là chuẩn mực ở tạp hóa. */
+  dueDate?: string;
 }
 
 /**
@@ -133,9 +149,20 @@ export interface ReceiveItemInput {
   productId: string;
   productName: string;
   unit: string;
+  /** Số lượng theo ĐƠN VỊ BÁN. Nhập theo thùng thì server tự nhân ra từ packQty. */
   quantity: number;
   priceBuy: number;
   currentStock: number; // chỉ dùng UI hiển thị, không gửi server
+
+  /** Nhập theo thùng: số thùng chủ tiệm gõ vào. */
+  packQty?: number;
+  /** Số đơn vị bán trong 1 thùng tại thời điểm nhập. */
+  packSize?: number;
+  packUnit?: string;
+  /** Giá một thùng. Server chia ra giá mỗi đơn vị bán. */
+  packPrice?: number;
+  /** Hàng tặng kèm: cộng kho nhưng KHÔNG đụng giá vốn. */
+  isGift?: boolean;
 }
 
 // =============================================================================
