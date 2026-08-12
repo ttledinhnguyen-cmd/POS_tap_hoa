@@ -174,7 +174,18 @@ export function POSPage() {
 
   // Continuous scan: KHÔNG đóng scanner sau scan. Set toast feedback cho user.
   async function handleScanned(barcode: string) {
-    if (!orgId) return;
+    // Chưa chọn tiệm thì KHÔNG được im lặng bỏ qua. Trường hợp này có thật:
+    // super_admin chưa thuộc tiệm nào vẫn vào thẳng được app (AuthGuard cho
+    // qua), rồi quét mã mà không thấy phản hồi gì — trông y hệt camera hỏng.
+    if (!orgId) {
+      setScanFeedback({
+        type: "error",
+        message: "Chưa chọn tiệm",
+        sublabel: "Tạo tiệm trước khi bán hàng",
+        timestamp: Date.now(),
+      });
+      return;
+    }
     const product = await db.products
       .where({ orgId, barcode })
       .first();

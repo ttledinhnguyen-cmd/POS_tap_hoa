@@ -311,12 +311,16 @@ export const useAuthStore = create<AuthState>()(
         });
 
         if (memberships.length === 0) {
+          // "no-org" cho MỌI user, kể cả super_admin. Trước đây super_admin
+          // được cho "ready" để vào trang Quản trị, nhưng như vậy họ lọt luôn
+          // vào màn hình bán hàng với orgId rỗng — quét mã không phản hồi,
+          // nhập kho không lưu, chẳng báo lỗi gì. Ngoại lệ cho /admin xử lý ở
+          // AuthGuard, nơi biết được route hiện tại.
           set({
             memberships: [],
             currentOrgId: null,
             currentSubscription: null,
-            // super_admin chưa có tiệm nào vẫn phải vào được trang Quản trị
-            status: ctx.is_super_admin ? "ready" : "no-org",
+            status: "no-org",
             error: null,
           });
           return;

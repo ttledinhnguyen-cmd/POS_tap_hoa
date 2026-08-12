@@ -66,7 +66,15 @@ export function AuthGuard({ children, allowNoOrg = false, allowExpired = false }
   }
 
   if (status === "no-org" && !allowNoOrg) {
-    return <Navigate to="/onboarding" replace />;
+    // super_admin chưa có tiệm vẫn phải vào được khu Quản trị để tạo tiệm cho
+    // khách. Nhưng CHỈ /admin — mọi route bán hàng khác đều cần một tiệm, cho
+    // vào sẽ thành màn hình chết lặng (quét mã không phản hồi, lưu không được).
+    const adminException =
+      isSuperAdmin &&
+      (location.pathname === "/admin" || location.pathname.startsWith("/admin/"));
+    if (!adminException) {
+      return <Navigate to="/onboarding" replace />;
+    }
   }
 
   // Subscription gate (skip for super_admin + allowExpired routes + no-org wizard)
