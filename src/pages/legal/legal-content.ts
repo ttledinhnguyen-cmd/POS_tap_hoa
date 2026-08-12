@@ -52,7 +52,7 @@ khách hàng, báo cáo doanh thu.
 ## 5. Quyền và nghĩa vụ nhà cung cấp
 
 - Cam kết uptime: **best-effort** (không SLA chính thức ở giai đoạn beta).
-- Backup dữ liệu hàng ngày, lưu trữ tại Supabase Singapore.
+- Backup dữ liệu hàng ngày, lưu trên máy chủ riêng đặt tại Việt Nam.
 - Hỗ trợ trong giờ hành chính qua Zalo + email.
 - Chúng tôi có quyền **tạm khóa** (suspend) tài khoản khi:
   - Quá hạn thanh toán > 7 ngày
@@ -129,21 +129,24 @@ bên thứ 3.
 
 ## 3. Bên thứ 3 xử lý dữ liệu
 
-- **Supabase, Inc.** (data processor): lưu trữ database + auth + edge
-  functions. Server tại Singapore. [supabase.com](https://supabase.com)
 - **Goong Maps** (geocoding): chỉ gửi địa chỉ text → nhận lat/lng. KHÔNG
   gửi thông tin cá nhân.
 - **Open Food Facts**: chỉ gửi mã vạch để lookup tên sản phẩm public. KHÔNG
   gửi thông tin shop.
 - **GitHub** (source code hosting): chỉ code app, KHÔNG có dữ liệu shop.
 
-Tất cả các bên trên đều có cam kết bảo mật và GDPR/PDP-equivalent compliance.
+Cơ sở dữ liệu và hệ thống tài khoản do chúng tôi **tự vận hành trên máy chủ
+riêng**, không giao cho bên thứ 3 nào lưu trữ.
+
+Các bên thứ 3 nêu trên đều có cam kết bảo mật tương đương GDPR/PDP.
 
 ## 4. Lưu trữ dữ liệu
 
-- **Vị trí**: Supabase region Singapore (ap-southeast-1).
-- **Backup**: hàng ngày tự động qua Supabase Pro tier, giữ 7 ngày.
-- **Mã hóa**: TLS 1.2+ trên đường truyền, AES-256 at rest (Supabase managed).
+- **Vị trí**: máy chủ riêng đặt tại Việt Nam. Dữ liệu KHÔNG rời khỏi lãnh thổ
+  Việt Nam — phù hợp yêu cầu lưu trữ trong nước tại Nghị định 53/2022.
+- **Backup**: hàng ngày, giữ tối thiểu 7 ngày.
+- **Mã hóa**: TLS 1.2+ trên đường truyền. Mật khẩu băm bằng scrypt, không lưu
+  dạng đọc được. Token phiên chỉ lưu bản băm.
 
 ## 5. Quyền của chủ thể dữ liệu (theo NĐ 13/2023)
 

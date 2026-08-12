@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { useAuthStore } from "@/stores/auth";
 import { Button } from "@/components/ui/Button";
 import { FormField } from "@/components/ui/FormField";
@@ -14,11 +14,14 @@ const EMAIL_RE = /^\S+@\S+\.\S+$/;
 
 interface CreateResponse {
   org_id: string;
-  owner_user_id: string;
-  invite_sent: boolean;
-  warning?: string;
-  message?: string;
-  error?: string;
+  owner_email: string;
+  /** false nghĩa là email đó đã có tài khoản, chỉ gắn thêm quyền owner. */
+  owner_created: boolean;
+  /**
+   * Link để chủ shop tự đặt mật khẩu. Hiện SMTP chưa nối nên server trả thẳng
+   * về đây cho admin copy gửi tay. Khi có mail server thì trường này biến mất.
+   */
+  invite_link: string | null;
 }
 
 export function AdminShopNewPage() {
@@ -69,46 +72,32 @@ export function AdminShopNewPage() {
 
     setSubmitting(true);
     try {
-      const { data, error: invokeErr } = await supabase.functions.invoke<
-        CreateResponse
-      >("admin-create-shop", {
-        body: {
-          org_name: orgName.trim(),
-          owner_email: ownerEmail.trim(),
-          tax_code: taxCode.trim() || undefined,
-          address: address.trim() || undefined,
-          address_full: addressDetail?.address_full ?? undefined,
-          latitude: addressDetail?.latitude ?? undefined,
-          longitude: addressDetail?.longitude ?? undefined,
-          phone: phone.trim() || undefined,
-          trial_days: trialDays,
-          monthly_price: monthlyPrice,
-        },
+      // Thay Edge Function admin-create-shop: server tự host làm cả ba việc
+      // trong một lời gọi — tạo tiệm + subscription, tạo tài khoản chủ shop
+      // nếu chưa có, gắn làm owner. Lỗi ném ra dạng ApiError với message
+      // tiếng Việt sẵn nên không phải bóc body thủ công như trước.
+      const data = await api.post<CreateResponse>("/admin/create-shop", {
+        org_name: orgName.trim(),
+        owner_email: ownerEmail.trim(),
+        tax_code: taxCode.trim() || undefined,
+        address: address.trim() || undefined,
+        address_full: addressDetail?.address_full ?? undefined,
+        latitude: addressDetail?.latitude ?? undefined,
+        longitude: addressDetail?.longitude ?? undefined,
+        phone: phone.trim() || undefined,
+        trial_days: trialDays,
+        monthly_price: monthlyPrice,
       });
-      // FunctionsHttpError giữ generic message ("non-2xx") — đọc body từ
-      // context.response để extract error JSON edge function trả về.
-      if (invokeErr) {
-        let detail = invokeErr.message;
-        // FunctionsHttpError.context giữ raw Response — đọc body để lấy
-        // error JSON edge function trả về (tránh generic "non-2xx" message)
-        const ctx = (invokeErr as unknown as { context?: Response }).context;
-        if (ctx && typeof ctx.clone === "function") {
-          try {
-            const body = await ctx.clone().json();
-            if (body?.error) detail = body.error;
-          } catch {
-            // ignore parse fail
-          }
-        }
-        throw new Error(detail);
-      }
-      if (!data || data.error) {
-        throw new Error(data?.error ?? "Tạo shop thất bại");
-      }
-      // Nếu có warning (vd. invite không gửi được nhưng owner đã tạo) → vẫn
-      // navigate sang shop detail nhưng alert ngắn cho admin biết
-      if (data.warning) {
-        alert(`Tạo shop OK. Lưu ý: ${data.warning}`);
+
+      // Chưa nối SMTP: admin phải tự gửi link cho chủ shop. Nói rõ ra thay vì
+      // để họ tưởng khách đã nhận được mail.
+      if (data.invite_link) {
+        window.prompt(
+          "Chưa nối email tự động. Copy link này gửi cho chủ shop để họ đặt mật khẩu (hết hạn sau 72 giờ):",
+          data.invite_link,
+        );
+      } else if (!data.owner_created) {
+        alert("Email này đã có tài khoản — đã gắn làm chủ tiệm mới.");
       }
       navigate(`/admin/shops/${data.org_id}`, { replace: true });
     } catch (err) {

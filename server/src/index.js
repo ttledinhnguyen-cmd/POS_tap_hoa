@@ -3,6 +3,7 @@ import { pool, closePool } from "./db.js";
 import { verifyAccessToken } from "./auth.js";
 import authRoutes from "./routes/auth.js";
 import dataRoutes from "./routes/data.js";
+import adminRoutes from "./routes/admin.js";
 
 const PORT = Number(process.env.PORT ?? 8210);
 const isProd = process.env.NODE_ENV === "production";
@@ -88,6 +89,7 @@ app.get("/api/health", async () => {
 
 await app.register(authRoutes, { prefix: "/api/auth" });
 await app.register(dataRoutes, { prefix: "/api" });
+await app.register(adminRoutes, { prefix: "/api/admin" });
 
 // -----------------------------------------------------------------------------
 // Khởi động

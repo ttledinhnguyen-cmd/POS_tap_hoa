@@ -9,7 +9,8 @@ import {
 } from "lucide-react";
 import { Sheet } from "@/components/ui/Sheet";
 import { Button } from "@/components/ui/Button";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
+import { db } from "@/lib/db";
 import { productsSync } from "@/integrations/sync/products-sync";
 import { contributeBarcode } from "@/integrations/barcode/lookup";
 import { useAuthStore } from "@/stores/auth";
@@ -441,16 +442,12 @@ export function BulkImportSheet({ open, onClose }: Props) {
       .filter((r) => r.status !== "error" && r.barcode)
       .map((r) => r.barcode);
     if (candidateBarcodes.length > 0) {
-      const { data, error } = await supabase
-        .from("products")
-        .select("barcode")
-        .eq("org_id", orgId)
-        .in("barcode", candidateBarcodes);
-      if (error) {
-        setParseError(`Lỗi check trùng: ${error.message}`);
-        return;
-      }
-      setDuplicatesInDb(new Set((data ?? []).map((d) => d.barcode as string)));
+      // Đối chiếu với Dexie thay vì hỏi server: sản phẩm đã được kéo đủ về máy
+      // lúc đăng nhập, nên kiểm tra trùng chạy được cả khi mất mạng và không
+      // cần endpoint lọc theo danh sách mã.
+      const existing = await db.products.where("orgId").equals(orgId).toArray();
+      const known = new Set(existing.map((p) => p.barcode).filter(Boolean));
+      setDuplicatesInDb(new Set(candidateBarcodes.filter((b) => known.has(b))));
     } else {
       setDuplicatesInDb(new Set());
     }
@@ -473,9 +470,20 @@ export function BulkImportSheet({ open, onClose }: Props) {
     const skippedSet = new Set(skippedDb.map((r) => r.excelRow));
     const upsertCandidates = toImport.filter((r) => !skippedSet.has(r.excelRow));
 
-    // Build payload — defense-in-depth: org_id từ store, không trust input
+    // Với chiến lược ghi đè, phải dùng LẠI id của sản phẩm đang có cùng mã
+    // vạch. Sinh id mới sẽ đụng unique index (org_id, barcode) và cả chunk lỗi,
+    // vì API upsert chỉ khớp theo id.
+    const existingByBarcode = new Map<string, string>();
+    if (strategy === "overwrite") {
+      const existing = await db.products.where("orgId").equals(orgId).toArray();
+      for (const p of existing) {
+        if (p.barcode) existingByBarcode.set(p.barcode, p.id);
+      }
+    }
+
+    // Build payload — org_id lấy từ store, không tin dữ liệu trong file
     const payload = upsertCandidates.map((r) => ({
-      id: crypto.randomUUID(),
+      id: (r.barcode && existingByBarcode.get(r.barcode)) || crypto.randomUUID(),
       org_id: orgId,
       barcode: r.barcode || null,
       name: r.name,
@@ -506,17 +514,16 @@ export function BulkImportSheet({ open, onClose }: Props) {
       for (let i = startFromChunk; i < chunks.length; i++) {
         if (ctrl.signal.aborted) break;
         const chunk = chunks[i];
-        const onConflict = strategy === "overwrite" ? "org_id,barcode" : "id";
-        const { error } = await supabase
-          .from("products")
-          .upsert(chunk, { onConflict })
-          .abortSignal(ctrl.signal);
-        if (error) {
-          // Mặc định coi như cả chunk fail. User retry sẽ resume từ đây.
-          throw new Error(error.message);
+        // API upsert từng sản phẩm một. Chạy tuần tự trong chunk để một dòng
+        // hỏng không kéo theo cả loạt, và giữ nguyên khả năng resume từ chunk
+        // đang dở nếu user tạm dừng.
+        for (const row of chunk) {
+          if (ctrl.signal.aborted) break;
+          await api.upsertProduct(row);
         }
         if (strategy === "overwrite") {
-          // Phân biệt insert vs update khó (Supabase không trả). Đếm chung là updated nếu trùng.
+          // Không phân biệt được insert hay update ở phía client — đếm theo số
+          // mã đã có sẵn trong máy.
           const dbDupesInChunk = chunk.filter(
             (p) => p.barcode && duplicatesInDb.has(p.barcode),
           ).length;

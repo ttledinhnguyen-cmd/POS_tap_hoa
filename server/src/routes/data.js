@@ -13,11 +13,28 @@ const READABLE = {
   products:            { filters: ["org_id", "barcode"], order: "updated_at desc" },
   categories:          { filters: ["org_id"],            order: "display_order asc" },
   orders:              { filters: ["org_id"],            order: "created_at desc" },
-  order_items:         { filters: ["order_id"],          order: null },
   goods_receipts:      { filters: ["org_id"],            order: "receipt_date desc" },
-  goods_receipt_items: { filters: ["receipt_id"],        order: null },
-  stock_takes:         { filters: ["org_id"],            order: "take_date desc" },
-  stock_take_items:    { filters: ["stock_take_id"],     order: null },
+  stock_takes:         { filters: ["org_id", "id"],      order: "take_date desc" },
+
+  // Ba bảng chi tiết dưới đây cho lọc theo org_id qua JOIN với bảng cha.
+  // Không có join thì client phải bắn một request cho MỖI đơn hàng khi kéo về
+  // 30 ngày lịch sử — hàng trăm request trên 3G.
+  // RLS vẫn gác: policy của chúng đã kiểm tra qua org_id của bảng cha.
+  order_items: {
+    filters: ["order_id"],
+    order: null,
+    parent: { table: "orders", fk: "order_id" },
+  },
+  goods_receipt_items: {
+    filters: ["receipt_id"],
+    order: null,
+    parent: { table: "goods_receipts", fk: "receipt_id" },
+  },
+  stock_take_items: {
+    filters: ["stock_take_id"],
+    order: null,
+    parent: { table: "stock_takes", fk: "stock_take_id" },
+  },
   shared_barcodes:     { filters: ["barcode"],           order: null },
   organizations:       { filters: [],                    order: "created_at asc" },
   memberships:         { filters: ["org_id"],            order: null },
@@ -129,21 +146,39 @@ export default async function dataRoutes(app) {
       const v = req.query[col];
       if (v !== undefined && v !== "") {
         params.push(v);
-        where.push(`${col} = $${params.length}`);
+        where.push(`t.${col} = $${params.length}`);
       }
     }
 
-    // updated_at > since: dùng cho đồng bộ tăng dần, khỏi kéo lại toàn bộ bảng
+    // Bảng chi tiết lọc theo org_id: join lên bảng cha. Tên bảng/cột lấy từ
+    // allowlist ở trên, không phải từ input.
+    let from = `public.${table} t`;
+    if (spec.parent && req.query.org_id) {
+      from = `public.${table} t join public.${spec.parent.table} p on p.id = t.${spec.parent.fk}`;
+      params.push(req.query.org_id);
+      where.push(`p.org_id = $${params.length}`);
+      if (req.query.since_parent) {
+        params.push(req.query.since_parent);
+        where.push(`p.created_at >= $${params.length}`);
+      }
+    }
+
+    // updated_at > since: đồng bộ tăng dần, khỏi kéo lại cả bảng mỗi nhịp poll
     if (req.query.since && ["products", "categories", "orders"].includes(table)) {
       params.push(req.query.since);
-      where.push(`updated_at > $${params.length}`);
+      where.push(`t.updated_at > $${params.length}`);
+    }
+    // orders còn lọc theo cửa sổ thời gian: chỉ giữ lịch sử gần đây ở máy bán
+    if (req.query.since_created && table === "orders") {
+      params.push(req.query.since_created);
+      where.push(`t.created_at >= $${params.length}`);
     }
 
     const limit = Math.min(Number(req.query.limit) || 1000, 5000);
     const sql = [
-      `select * from public.${table}`,
+      `select t.* from ${from}`,
       where.length ? `where ${where.join(" and ")}` : "",
-      spec.order ? `order by ${spec.order}` : "",
+      spec.order ? `order by t.${spec.order}` : "",
       `limit ${limit}`,
     ].filter(Boolean).join(" ");
 

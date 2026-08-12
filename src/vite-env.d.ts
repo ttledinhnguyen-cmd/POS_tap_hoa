@@ -1,8 +1,8 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_SUPABASE_URL: string;
-  readonly VITE_SUPABASE_ANON_KEY: string;
+  /** Goc API. Bo trong = cung origin (/api), dung cho production. */
+  readonly VITE_API_URL?: string;
   readonly VITE_GOONG_API_KEY?: string;
   readonly VITE_SUPPORT_ZALO?: string;
   readonly VITE_SUPPORT_EMAIL?: string;

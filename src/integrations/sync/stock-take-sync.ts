@@ -1,7 +1,7 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import { Poller, maxUpdatedAt } from "@/integrations/sync/poller";
 import { db } from "@/lib/db";
 import type { StockTake, StockTakeItem } from "@/types";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { productsSync } from "@/integrations/sync/products-sync";
 
 interface StockTakeRow {
@@ -64,8 +64,6 @@ function itemFromRow(row: StockTakeItemRow): StockTakeItem {
   };
 }
 
-const PULL_WINDOW_MS = 30 * 24 * 3600 * 1000;
-
 /**
  * Stock take sync — RPC-driven (KHÔNG outbox vì owner đứng đếm hàng cần
  * realtime sync giữa actual_count input và parent totals).
@@ -77,26 +75,26 @@ const PULL_WINDOW_MS = 30 * 24 * 3600 * 1000;
  *   - Sau commit gọi productsSync.pullProducts để Dexie sync stock mới
  */
 class StockTakeSync {
-  private channel: RealtimeChannel | null = null;
-  private subscribedOrgId: string | null = null;
   private pulledOrgs: Set<string> = new Set();
 
-  async pullStockTakes(orgId: string, sinceMs?: number): Promise<void> {
+  private poller = new Poller<StockTakeRow>({
+    table: "stock_takes",
+    apply: async (rows) => {
+      for (const row of rows) {
+        const incoming = fromRow(row);
+        const existing = await db.stockTakes.get(incoming.id);
+        if (existing && existing.updatedAt >= incoming.updatedAt) continue;
+        await db.stockTakes.put(incoming);
+      }
+    },
+    watermarkOf: (rows) => maxUpdatedAt(rows),
+  });
+
+  // sinceMs không còn dùng: server trả theo take_date giảm dần, giới hạn 1000
+  // dòng — thừa sức cho lịch sử kiểm kê của một tiệm.
+  async pullStockTakes(orgId: string, _sinceMs?: number): Promise<void> {
     if (!orgId) return;
-    const since = new Date(sinceMs ?? Date.now() - PULL_WINDOW_MS)
-      .toISOString()
-      .slice(0, 10);
-    const { data, error } = await supabase
-      .from("stock_takes")
-      .select("*")
-      .eq("org_id", orgId)
-      .gte("take_date", since)
-      .order("take_date", { ascending: false });
-    if (error) {
-      console.error("[stock-take-sync] pull failed:", error.message);
-      throw error;
-    }
-    const rows = (data ?? []) as StockTakeRow[];
+    const rows = await api.list<StockTakeRow>("stock_takes", { org_id: orgId });
     const takes = rows.map(fromRow);
     await db.stockTakes.bulkPut(takes);
     this.pulledOrgs.add(orgId);
@@ -114,13 +112,9 @@ class StockTakeSync {
 
   /** Pull items của 1 take. KHÔNG cache check vì items có thể đổi (in_progress). */
   async pullStockTakeItems(takeId: string): Promise<StockTakeItem[]> {
-    const { data, error } = await supabase
-      .from("stock_take_items")
-      .select("*")
-      .eq("stock_take_id", takeId)
-      .order("created_at", { ascending: true });
-    if (error) throw error;
-    const rows = (data ?? []) as StockTakeItemRow[];
+    const rows = await api.list<StockTakeItemRow>("stock_take_items", {
+      stock_take_id: takeId,
+    });
     const items = rows.map(itemFromRow);
     // Replace cache
     await db.transaction("rw", db.stockTakeItems, async () => {
@@ -130,62 +124,19 @@ class StockTakeSync {
     return items;
   }
 
-  subscribeRealtime(orgId: string): void {
-    if (this.subscribedOrgId === orgId) return;
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.subscribedOrgId = orgId;
-    this.channel = supabase
-      .channel(`stock-takes:${orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "stock_takes",
-          filter: `org_id=eq.${orgId}`,
-        },
-        async (payload) => {
-          if (payload.eventType === "DELETE") {
-            const old = payload.old as { id?: string };
-            if (old?.id) {
-              await db.transaction(
-                "rw",
-                db.stockTakes,
-                db.stockTakeItems,
-                async () => {
-                  await db.stockTakes.delete(old.id!);
-                  await db.stockTakeItems
-                    .where("stockTakeId")
-                    .equals(old.id!)
-                    .delete();
-                },
-              );
-            }
-            return;
-          }
-          const row = payload.new as StockTakeRow;
-          if (!row?.id) return;
-          const incoming = fromRow(row);
-          const existing = await db.stockTakes.get(incoming.id);
-          if (existing && existing.updatedAt >= incoming.updatedAt) return;
-          await db.stockTakes.put(incoming);
-        },
-      )
-      .subscribe();
+  startPolling(orgId: string): void {
+    this.poller.start(orgId);
     if (import.meta.env.DEV) {
-      console.log(`[stock-take-sync] subscribed realtime for org ${orgId}`);
+      console.log(`[stock-take-sync] bắt đầu poll cho org ${orgId}`);
     }
   }
 
-  unsubscribeAndReset(): void {
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.subscribedOrgId = null;
+  syncNow(): Promise<void> {
+    return this.poller.tick();
+  }
+
+  stopAndReset(): void {
+    this.poller.stop();
     this.pulledOrgs.clear();
   }
 
@@ -194,11 +145,10 @@ class StockTakeSync {
   // -------------------------------------------------------------------------
 
   async createStockTake(orgId: string, notes?: string): Promise<string> {
-    const { data, error } = await supabase.rpc("create_stock_take", {
+    const data = await api.rpc<string>("create_stock_take", {
       p_org_id: orgId,
       p_notes: notes ?? null,
     });
-    if (error) throw error;
     return data as string;
   }
 
@@ -208,13 +158,12 @@ class StockTakeSync {
     actualCount: number,
     reason?: string,
   ): Promise<string> {
-    const { data, error } = await supabase.rpc("add_stock_take_item", {
+    const data = await api.rpc<string>("add_stock_take_item", {
       p_take_id: takeId,
       p_product_id: productId,
       p_actual_count: actualCount,
       p_reason: reason ?? null,
     });
-    if (error) throw error;
     // Refetch items + parent totals
     await Promise.all([
       this.pullStockTakeItems(takeId),
@@ -228,12 +177,11 @@ class StockTakeSync {
     actualCount: number,
     reason?: string,
   ): Promise<void> {
-    const { error } = await supabase.rpc("update_stock_take_item", {
+    await api.rpc("update_stock_take_item", {
       p_item_id: itemId,
       p_actual_count: actualCount,
       p_reason: reason ?? null,
     });
-    if (error) throw error;
     // Lookup take_id từ Dexie để refetch
     const item = await db.stockTakeItems.get(itemId);
     if (item) {
@@ -246,10 +194,9 @@ class StockTakeSync {
 
   async removeItem(itemId: string): Promise<void> {
     const item = await db.stockTakeItems.get(itemId);
-    const { error } = await supabase.rpc("remove_stock_take_item", {
+    await api.rpc("remove_stock_take_item", {
       p_item_id: itemId,
     });
-    if (error) throw error;
     if (item) {
       await Promise.all([
         this.pullStockTakeItems(item.stockTakeId),
@@ -259,10 +206,9 @@ class StockTakeSync {
   }
 
   async commit(takeId: string): Promise<void> {
-    const { error } = await supabase.rpc("commit_stock_take", {
+    await api.rpc("commit_stock_take", {
       p_take_id: takeId,
     });
-    if (error) throw error;
     // Refetch take + products (stock đã đổi)
     await this.pullStockTakeHeader(takeId);
     const take = await db.stockTakes.get(takeId);
@@ -274,23 +220,17 @@ class StockTakeSync {
   }
 
   async cancel(takeId: string): Promise<void> {
-    const { error } = await supabase.rpc("cancel_stock_take", {
+    await api.rpc("cancel_stock_take", {
       p_take_id: takeId,
     });
-    if (error) throw error;
     await this.pullStockTakeHeader(takeId);
   }
 
-  /** Refetch 1 take header (sau RPC mutate) — re-query Supabase. */
+  /** Kéo lại header của một phiếu sau khi RPC vừa đổi tổng. */
   async pullStockTakeHeader(takeId: string): Promise<void> {
-    const { data, error } = await supabase
-      .from("stock_takes")
-      .select("*")
-      .eq("id", takeId)
-      .maybeSingle();
-    if (error) throw error;
-    if (!data) return;
-    await db.stockTakes.put(fromRow(data as StockTakeRow));
+    const rows = await api.list<StockTakeRow>("stock_takes", { id: takeId });
+    if (rows.length === 0) return;
+    await db.stockTakes.put(fromRow(rows[0]));
   }
 }
 

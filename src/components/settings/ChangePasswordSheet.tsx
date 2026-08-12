@@ -2,7 +2,6 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Sheet } from "@/components/ui/Sheet";
 import { FormField } from "@/components/ui/FormField";
 import { Button } from "@/components/ui/Button";
-import { supabase } from "@/integrations/supabase";
 import { useAuthStore } from "@/stores/auth";
 import { vibrate } from "@/lib/utils";
 
@@ -14,15 +13,16 @@ interface Props {
 const SUCCESS_AUTOCLOSE_MS = 1500;
 
 /**
- * ChangePasswordSheet — re-authenticate với mật khẩu hiện tại để verify, rồi
- * updateUser với password mới.
+ * Đổi mật khẩu.
  *
- * Re-auth dùng signInWithPassword: nếu sai → "Mật khẩu hiện tại không đúng";
- * nếu đúng → session refresh + tiến hành updateUser. Side effect SIGNED_IN
- * event trong store đã được handle (loadMemberships chạy lại) — OK.
+ * Khác bản Supabase (đăng nhập lại để xác thực rồi mới updateUser): server tự
+ * host kiểm tra mật khẩu hiện tại ngay trong cùng lời gọi. Đổi xong server thu
+ * hồi TOÀN BỘ refresh token — kể cả phiên đang mở — nên user phải đăng nhập
+ * lại. Cố ý: đổi mật khẩu thường là vì nghi bị lộ.
  */
 export function ChangePasswordSheet({ open, onClose }: Props) {
   const user = useAuthStore((s) => s.user);
+  const changePassword = useAuthStore((s) => s.changePassword);
 
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
@@ -68,25 +68,19 @@ export function ChangePasswordSheet({ open, onClose }: Props) {
     if (Object.keys(next_errors).length > 0) return;
 
     setSubmitting(true);
-    // 1. Re-auth — verify mật khẩu hiện tại
-    const { error: reauthErr } = await supabase.auth.signInWithPassword({
-      email: user.email,
-      password: current,
-    });
-    if (reauthErr) {
-      setSubmitting(false);
-      setErrors({ current: "Mật khẩu hiện tại không đúng" });
-      vibrate(15);
-      return;
-    }
-    // 2. Update password
-    const { error: updateErr } = await supabase.auth.updateUser({
-      password: next,
-    });
+    // Server tự kiểm tra mật khẩu hiện tại trong cùng một lời gọi, không cần
+    // đăng nhập lại để xác thực như bản Supabase. Đổi xong server thu hồi mọi
+    // refresh token nên store sẽ tự đưa về màn đăng nhập.
+    const { error } = await changePassword(current, next);
     setSubmitting(false);
     vibrate(15);
-    if (updateErr) {
-      setSubmitError(updateErr.message);
+
+    if (error) {
+      if (error.includes("hiện tại")) {
+        setErrors({ current: error });
+      } else {
+        setSubmitError(error);
+      }
       return;
     }
     setSuccessAt(Date.now());

@@ -14,7 +14,7 @@ import {
   TrendingUp,
   Users,
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { DashboardMetrics, ShopWithStats } from "@/types";
@@ -77,14 +77,12 @@ export function AdminDashboardPage() {
     (async () => {
       try {
         const [m, s] = await Promise.all([
-          supabase.rpc("admin_dashboard_metrics"),
-          supabase.rpc("admin_list_shops"),
+          api.rpc<DashboardMetrics>("admin_dashboard_metrics"),
+          api.rpc<ShopWithStats[]>("admin_list_shops"),
         ]);
         if (cancelled) return;
-        if (m.error) throw m.error;
-        if (s.error) throw s.error;
-        setMetrics(m.data as DashboardMetrics);
-        setShops((s.data ?? []) as ShopWithStats[]);
+        setMetrics(m);
+        setShops(s ?? []);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Tải dữ liệu thất bại");

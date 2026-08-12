@@ -16,7 +16,7 @@ import {
   Users,
   Wallet,
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { useAuthStore } from "@/stores/auth";
 import { RoleGate } from "@/components/RoleGate";
 import { Button } from "@/components/ui/Button";
@@ -280,15 +280,14 @@ function MembersList({ orgId }: { orgId: string | null }) {
     setMembers(null);
     setError(undefined);
     (async () => {
-      const { data, error } = await supabase.rpc("get_org_members", {
-        p_org_id: orgId,
-      });
-      if (cancelled) return;
-      if (error) {
-        setError(error.message);
-        return;
+      try {
+        const data = await api.rpc<Member[]>("get_org_members", { p_org_id: orgId });
+        if (cancelled) return;
+        setMembers(data ?? []);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err instanceof Error ? err.message : "Tải danh sách thất bại");
       }
-      setMembers((data ?? []) as Member[]);
     })();
     return () => {
       cancelled = true;

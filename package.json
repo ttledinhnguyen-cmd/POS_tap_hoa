@@ -12,7 +12,6 @@
   },
   "dependencies": {
     "@goongmaps/goong-js": "^1.0.9",
-    "@supabase/supabase-js": "^2.105.1",
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "clsx": "^2.1.1",
@@ -34,7 +33,6 @@
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
-    "supabase": "^2.96.0",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.2",
     "vite": "^6.0.3",

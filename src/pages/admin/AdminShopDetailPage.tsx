@@ -8,7 +8,7 @@ import {
   Pause,
   Play,
 } from "lucide-react";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { Button } from "@/components/ui/Button";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -79,18 +79,12 @@ export function AdminShopDetailPage() {
     setLoading(true);
     setError(null);
     try {
-      const [{ data: shopList, error: e1 }, { data: subRow, error: e2 }] =
-        await Promise.all([
-          supabase.rpc("admin_list_shops"),
-          supabase
-            .from("subscriptions")
-            .select("*")
-            .eq("org_id", id)
-            .maybeSingle(),
-        ]);
-      if (e1) throw e1;
-      if (e2) throw e2;
-      const found = ((shopList ?? []) as ShopWithStats[]).find(
+      const [shopList, subRows] = await Promise.all([
+        api.rpc<ShopWithStats[]>("admin_list_shops"),
+        api.list<SubscriptionRow>("subscriptions", { org_id: id }),
+      ]);
+      const subRow = subRows[0] ?? null;
+      const found = (shopList ?? []).find(
         (s) => s.org_id === id,
       );
       if (!found) {
@@ -113,15 +107,14 @@ export function AdminShopDetailPage() {
           updatedAt: sr.updated_at,
         });
 
-        // Load payment history
-        const { data: pays, error: e3 } = await supabase
-          .from("subscription_payments")
-          .select("*")
-          .eq("subscription_id", sr.id)
-          .order("payment_date", { ascending: false });
-        if (e3) throw e3;
+        // Lịch sử thanh toán đi qua endpoint admin riêng: bảng
+        // subscription_payments chỉ lọc được theo subscription_id, còn server
+        // join sẵn theo org nên chỉ cần một lời gọi.
+        const { data: pays } = await api.get<{ data: PaymentRow[] }>(
+          `/admin/shop/${id}/payments`,
+        );
         setPayments(
-          ((pays ?? []) as PaymentRow[]).map((p) => ({
+          (pays ?? []).map((p) => ({
             id: p.id,
             subscriptionId: sr.id,
             amount: Number(p.amount),
@@ -152,14 +145,13 @@ export function AdminShopDetailPage() {
     if (!confirm(`Ghi nhận ${formatVND(amount)}đ cho ${months} tháng?`)) return;
     setActionPending(`pay-${months}`);
     try {
-      const { error: err } = await supabase.rpc("record_payment", {
+      await api.rpc("record_payment", {
         p_org_id: shop.org_id,
         p_amount: amount,
         p_period_months: months,
         p_method: "bank_transfer",
         p_notes: null,
       });
-      if (err) throw err;
       await reload();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Ghi nhận thất bại");
@@ -172,11 +164,10 @@ export function AdminShopDetailPage() {
     if (!shop || !trialDate) return;
     setActionPending("extend");
     try {
-      const { error: err } = await supabase.rpc("extend_trial", {
+      await api.rpc("extend_trial", {
         p_org_id: shop.org_id,
         p_new_trial_date: trialDate,
       });
-      if (err) throw err;
       setTrialDate("");
       await reload();
     } catch (err) {
@@ -192,11 +183,10 @@ export function AdminShopDetailPage() {
       if (!confirm("Mở khóa shop?")) return;
       setActionPending("unsuspend");
       try {
-        const { error: err } = await supabase.rpc("unsuspend_shop", {
+        await api.rpc("unsuspend_shop", {
           p_org_id: shop.org_id,
         });
-        if (err) throw err;
-        await reload();
+          await reload();
       } catch (err) {
         alert(err instanceof Error ? err.message : "Mở khóa thất bại");
       } finally {
@@ -207,12 +197,11 @@ export function AdminShopDetailPage() {
       if (reason === null) return;
       setActionPending("suspend");
       try {
-        const { error: err } = await supabase.rpc("suspend_shop", {
+        await api.rpc("suspend_shop", {
           p_org_id: shop.org_id,
           p_reason: reason || null,
         });
-        if (err) throw err;
-        await reload();
+          await reload();
       } catch (err) {
         alert(err instanceof Error ? err.message : "Tạm khóa thất bại");
       } finally {

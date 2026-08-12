@@ -1,6 +1,6 @@
 import { db } from "@/lib/db";
 import type { OutboxJob } from "@/integrations/shared/queue";
-import { supabase } from "@/integrations/supabase";
+import { api, ApiError } from "@/integrations/api";
 
 /**
  * Backoff schedule cho retry sau lỗi (mạng / 5xx).
@@ -136,6 +136,18 @@ class OutboxWorker {
     } catch (err) {
       const attempts = job.attempts + 1;
       const errMsg = err instanceof Error ? err.message : String(err);
+
+      // 4xx (trừ 429) là lỗi vĩnh viễn: sai dữ liệu hoặc không có quyền. Thử
+      // lại 6 lần trong 35 phút cũng ra kết quả y hệt, chỉ tổ giữ job trong
+      // hàng đợi và che mất các job sau.
+      if (err instanceof ApiError && !err.isTransient && err.status >= 400) {
+        await db.outbox.update(job.id, { status: "failed", attempts, lastError: errMsg });
+        if (import.meta.env.DEV) {
+          console.error(`[outbox] hỏng vĩnh viễn (${err.status}): ${job.type}`, errMsg);
+        }
+        return;
+      }
+
       if (attempts >= MAX_ATTEMPTS) {
         await db.outbox.update(job.id, {
           status: "failed",
@@ -162,52 +174,37 @@ class OutboxWorker {
   }
 
   /**
-   * Job handlers. Throw để trigger retry; chỉ throw lỗi tạm thời (mạng/5xx).
-   * Lỗi vĩnh viễn (4xx validation, RLS deny) sẽ retry hết quota rồi mark failed.
+   * Job handlers. Throw để trigger retry.
+   *
+   * Lỗi phân quyền (403) là VĨNH VIỄN — thử lại bao nhiêu lần cũng vậy, nên
+   * đánh hỏng luôn thay vì đốt hết 6 lượt backoff. Lỗi mạng/5xx thì cứ thử lại.
    */
   private async runHandler(job: OutboxJob): Promise<void> {
     switch (job.type) {
       case "product.upsert": {
-        const { error } = await supabase
-          .from("products")
-          .upsert(job.payload as object, { onConflict: "id" });
-        if (error) throw new Error(error.message);
+        await api.upsertProduct(job.payload as Record<string, unknown>);
         return;
       }
       case "product.archive": {
         const p = job.payload as { id: string };
-        const { error } = await supabase
-          .from("products")
-          .update({ is_active: false })
-          .eq("id", p.id);
-        if (error) throw new Error(error.message);
+        await api.patchProduct(p.id, { is_active: false });
         return;
       }
       case "order.create": {
-        // Phase 5: gọi RPC create_order_with_items (idempotent qua order.id).
-        // Retry an toàn — RPC sẽ skip insert items + decrement stock nếu đã tồn tại.
+        // Idempotent qua order.id: retry sau khi mạng chập chờn sẽ KHÔNG chèn
+        // lại items và KHÔNG trừ kho lần hai.
         const p = job.payload as { order: object; items: object[] };
-        const { error } = await supabase.rpc("create_order_with_items", {
-          p_order: p.order,
-          p_items: p.items,
-        });
-        if (error) throw new Error(error.message);
+        await api.rpc("create_order_with_items", { p_order: p.order, p_items: p.items });
         return;
       }
       case "goods_receipt.create": {
-        // Phase 2A: gọi RPC create_goods_receipt (idempotent qua receipt.id).
-        // RPC tăng stock + overwrite price_buy lần đầu; retry skip cả 2.
+        // Idempotent qua receipt.id: retry không cộng dồn kho.
         const p = job.payload as { receipt: object; items: object[] };
-        const { error } = await supabase.rpc("create_goods_receipt", {
-          p_receipt: p.receipt,
-          p_items: p.items,
-        });
-        if (error) throw new Error(error.message);
+        await api.rpc("create_goods_receipt", { p_receipt: p.receipt, p_items: p.items });
         return;
       }
       default:
-        // Sprint 4+ thêm: invoice.issue, zns.send, ...
-        throw new Error(`Unknown job type: ${job.type}`);
+        throw new Error(`Job type lạ: ${job.type}`);
     }
   }
 }

@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useState } from "react";
 import { Check } from "lucide-react";
 import { FormField } from "@/components/ui/FormField";
 import { Button } from "@/components/ui/Button";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { useAuthStore, useCurrentOrg } from "@/stores/auth";
 import { vibrate } from "@/lib/utils";
 import {
@@ -86,26 +86,28 @@ export function OrgInfoForm() {
     if (Object.keys(next).length > 0) return;
 
     setSubmitting(true);
-    // Dùng RPC update_organization (security definer, gate qua memberships
-    // owner check). Nhận thêm address_full + lat/lng từ Goong detail.
-    const { error } = await supabase.rpc("update_organization", {
-      p_org_id: orgId,
-      p_name: name.trim(),
-      p_tax_code: taxCode.trim() ? taxCode.replace(/[\s-]/g, "") : null,
-      p_address: address.trim() || null,
-      p_address_full: addressDetail?.address_full ?? null,
-      p_phone: phone.trim() ? phone.replace(/[\s-]/g, "") : null,
-      p_latitude: addressDetail?.latitude ?? null,
-      p_longitude: addressDetail?.longitude ?? null,
-    });
-    setSubmitting(false);
-
-    if (error) {
-      setSubmitError(error.message);
+    try {
+      // RPC update_organization tự kiểm tra người gọi là owner của tiệm hoặc
+      // super_admin. Nhận thêm address_full + toạ độ từ Goong.
+      await api.rpc("update_organization", {
+        p_org_id: orgId,
+        p_name: name.trim(),
+        p_tax_code: taxCode.trim() ? taxCode.replace(/[\s-]/g, "") : null,
+        p_address: address.trim() || null,
+        p_address_full: addressDetail?.address_full ?? null,
+        p_phone: phone.trim() ? phone.replace(/[\s-]/g, "") : null,
+        p_latitude: addressDetail?.latitude ?? null,
+        p_longitude: addressDetail?.longitude ?? null,
+      });
+    } catch (err) {
+      setSubmitting(false);
+      setSubmitError(err instanceof Error ? err.message : "Lưu thất bại");
       vibrate(15);
       return;
     }
-    // Refresh memberships → currentOrg tự cập nhật trong UserBlock + POSPage header
+    setSubmitting(false);
+
+    // Nạp lại memberships → tên tiệm ở header và UserBlock tự cập nhật
     await loadMemberships();
     vibrate(15);
     setSavedAt(Date.now());

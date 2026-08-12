@@ -1,4 +1,4 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
+import { Poller, maxUpdatedAt } from "@/integrations/sync/poller";
 import { db } from "@/lib/db";
 import type {
   GoodsReceipt,
@@ -6,7 +6,7 @@ import type {
   ReceiveInput,
   ReceiveItemInput,
 } from "@/types";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import type { OutboxJob } from "@/integrations/shared/queue";
 
 /**
@@ -72,7 +72,6 @@ function itemFromRow(row: GoodsReceiptItemRow): GoodsReceiptItem {
  * Pull window default: 30 ngày gần nhất.
  * Long-range query (báo cáo năm) defer Phase 3+.
  */
-const PULL_WINDOW_MS = 30 * 24 * 3600 * 1000;
 
 /**
  * Cost variance threshold — > 20% lệch so với trung bình 5 lần trước → cảnh báo.
@@ -81,8 +80,19 @@ const PULL_WINDOW_MS = 30 * 24 * 3600 * 1000;
 export const COST_VARIANCE_THRESHOLD = 0.2;
 
 class InventorySync {
-  private channel: RealtimeChannel | null = null;
-  private subscribedOrgId: string | null = null;
+  private poller = new Poller<GoodsReceiptRow>({
+    table: "goods_receipts",
+    apply: async (rows) => {
+      for (const row of rows) {
+        const incoming = fromRow(row);
+        const existing = await db.goodsReceipts.get(incoming.id);
+        // LWW: bản ghi lạc quan ở local có thể mới hơn ảnh chụp từ server
+        if (existing && existing.updatedAt >= incoming.updatedAt) continue;
+        await db.goodsReceipts.put(incoming);
+      }
+    },
+    watermarkOf: (rows) => maxUpdatedAt(rows),
+  });
   private pulledOrgs: Set<string> = new Set();
 
   /**
@@ -198,22 +208,13 @@ class InventorySync {
    * Pull receipts theo since (default 30 ngày gần nhất).
    * KHÔNG embed items — pull on demand khi user mở detail (giống order_items).
    */
-  async pullReceipts(orgId: string, sinceMs?: number): Promise<void> {
+  // Tham số sinceMs giữ lại cho tương thích với chỗ gọi cũ nhưng không dùng
+  // nữa: server trả sẵn theo thứ tự receipt_date giảm dần với giới hạn 1000
+  // dòng, mà một tiệm tạp hóa nhập hàng vài lần một tuần thì con số đó là
+  // nhiều năm lịch sử. Lọc thêm chỉ tốn thêm một tham số phải bảo trì.
+  async pullReceipts(orgId: string, _sinceMs?: number): Promise<void> {
     if (!orgId) return;
-    const since = new Date(sinceMs ?? Date.now() - PULL_WINDOW_MS)
-      .toISOString()
-      .slice(0, 10); // YYYY-MM-DD cho receipt_date
-    const { data, error } = await supabase
-      .from("goods_receipts")
-      .select("*")
-      .eq("org_id", orgId)
-      .gte("receipt_date", since)
-      .order("receipt_date", { ascending: false });
-    if (error) {
-      console.error("[inventory-sync] pull failed:", error.message);
-      throw error;
-    }
-    const rows = (data ?? []) as GoodsReceiptRow[];
+    const rows = await api.list<GoodsReceiptRow>("goods_receipts", { org_id: orgId });
     const receipts = rows.map(fromRow);
     await db.goodsReceipts.bulkPut(receipts);
     this.pulledOrgs.add(orgId);
@@ -241,83 +242,28 @@ class InventorySync {
       .toArray();
     if (cached.length > 0) return cached;
 
-    const { data, error } = await supabase
-      .from("goods_receipt_items")
-      .select("*")
-      .eq("receipt_id", receiptId);
-    if (error) {
-      console.error("[inventory-sync] pullReceiptItems failed:", error.message);
-      throw error;
-    }
-    const rows = (data ?? []) as GoodsReceiptItemRow[];
+    const rows = await api.list<GoodsReceiptItemRow>("goods_receipt_items", {
+      receipt_id: receiptId,
+    });
     const items = rows.map(itemFromRow);
     if (items.length) await db.goodsReceiptItems.bulkPut(items);
     return items;
   }
 
-  /**
-   * Subscribe realtime channel cho goods_receipts. Items KHÔNG realtime,
-   * pull on demand khi user mở detail.
-   */
-  subscribeRealtime(orgId: string): void {
-    if (this.subscribedOrgId === orgId) return;
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.subscribedOrgId = orgId;
-    this.channel = supabase
-      .channel(`goods-receipts:${orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "goods_receipts",
-          filter: `org_id=eq.${orgId}`,
-        },
-        async (payload) => {
-          if (payload.eventType === "DELETE") {
-            const old = payload.old as { id?: string };
-            if (old?.id) {
-              await db.transaction(
-                "rw",
-                db.goodsReceipts,
-                db.goodsReceiptItems,
-                async () => {
-                  await db.goodsReceipts.delete(old.id!);
-                  await db.goodsReceiptItems
-                    .where("receiptId")
-                    .equals(old.id!)
-                    .delete();
-                },
-              );
-            }
-            return;
-          }
-          // INSERT or UPDATE — LWW theo updatedAt (race với optimistic local write)
-          const row = payload.new as GoodsReceiptRow;
-          if (!row?.id) return;
-          const incoming = fromRow(row);
-          const existing = await db.goodsReceipts.get(incoming.id);
-          if (existing && existing.updatedAt >= incoming.updatedAt) {
-            return; // local mới hơn — giữ nguyên
-          }
-          await db.goodsReceipts.put(incoming);
-        },
-      )
-      .subscribe();
+  /** Theo dõi phiếu nhập từ máy khác. Chi tiết phiếu vẫn kéo khi mở xem. */
+  startPolling(orgId: string): void {
+    this.poller.start(orgId);
     if (import.meta.env.DEV) {
-      console.log(`[inventory-sync] subscribed realtime for org ${orgId}`);
+      console.log(`[inventory-sync] bắt đầu poll cho org ${orgId}`);
     }
   }
 
-  unsubscribeAndReset(): void {
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.subscribedOrgId = null;
+  syncNow(): Promise<void> {
+    return this.poller.tick();
+  }
+
+  stopAndReset(): void {
+    this.poller.stop();
     this.pulledOrgs.clear();
   }
 

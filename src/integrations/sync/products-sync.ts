@@ -1,11 +1,11 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { db } from "@/lib/db";
 import type { Product } from "@/types";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
+import { Poller, maxUpdatedAt } from "@/integrations/sync/poller";
 import type { OutboxJob } from "@/integrations/shared/queue";
 
 /**
- * Hàng row Supabase products (snake_case).
+ * Hàng products từ API (snake_case, khớp cột Postgres).
  */
 interface ProductRow {
   id: string;
@@ -25,7 +25,7 @@ interface ProductRow {
 }
 
 /**
- * Convert: Supabase row → Dexie Product (camelCase + tax fraction + epoch ms).
+ * Convert: row API → Dexie Product (camelCase + thuế dạng phân số + epoch ms).
  */
 function fromRow(row: ProductRow): Product {
   return {
@@ -84,31 +84,42 @@ export interface ProductInput {
 }
 
 class ProductsSync {
-  private channel: RealtimeChannel | null = null;
-  private subscribedOrgId: string | null = null;
   // Track org đã pull để tránh re-fetch khi switch back
   private pulledOrgs: Set<string> = new Set();
 
   /**
-   * Pull toàn bộ products của org từ Supabase, upsert Dexie.
-   * Idempotent — gọi lại nhiều lần OK.
+   * Áp các hàng nhận từ server về Dexie theo LWW (last-write-wins) trên
+   * updated_at.
+   *
+   * Vì sao phải so updated_at chứ không ghi đè thẳng: PaymentSheet trừ kho
+   * lạc quan ở local ngay khi thanh toán, nếu server trả về một ảnh chụp cũ
+   * hơn thì ghi đè sẽ làm tồn kho "nhảy lùi" trước mắt thu ngân.
+   */
+  private async applyRows(rows: ProductRow[]): Promise<void> {
+    for (const row of rows) {
+      const incoming = fromRow(row);
+      const existing = await db.products.get(incoming.id);
+      if (existing && existing.updatedAt >= incoming.updatedAt) continue;
+      await db.products.put(incoming);
+    }
+  }
+
+  private poller = new Poller<ProductRow>({
+    table: "products",
+    apply: (rows) => this.applyRows(rows),
+    watermarkOf: (rows) => maxUpdatedAt(rows),
+  });
+
+  /**
+   * Kéo toàn bộ products của org về Dexie. Idempotent — gọi lại nhiều lần OK.
    */
   async pullProducts(orgId: string): Promise<void> {
     if (!orgId) return;
-    const { data, error } = await supabase
-      .from("products")
-      .select("*")
-      .eq("org_id", orgId);
-    if (error) {
-      console.error("[products-sync] pull failed:", error.message);
-      throw error;
-    }
-    const rows = (data ?? []) as ProductRow[];
-    const products = rows.map(fromRow);
-    await db.products.bulkPut(products);
+    const rows = await api.list<ProductRow>("products", { org_id: orgId });
+    await db.products.bulkPut(rows.map(fromRow));
     this.pulledOrgs.add(orgId);
     if (import.meta.env.DEV) {
-      console.log(`[products-sync] pulled ${products.length} products for org ${orgId}`);
+      console.log(`[products-sync] đã kéo ${rows.length} sản phẩm cho org ${orgId}`);
     }
   }
 
@@ -121,62 +132,29 @@ class ProductsSync {
   }
 
   /**
-   * Subscribe realtime channel cho org. Tự unsubscribe channel cũ trước.
+   * Bật theo dõi thay đổi từ máy khác trong cùng tiệm.
+   *
+   * Thay cho realtime websocket của Supabase: poll theo updated_at mỗi 20 giây,
+   * cộng thêm kéo ngay khi user quay lại tab hoặc mạng vừa có lại. Sản phẩm bị
+   * XOÁ ở máy khác sẽ không biến mất ngay — nhưng app chỉ soft-delete
+   * (is_active=false) chứ không xoá thật, nên hàng đã archive vẫn về đúng qua
+   * poll.
    */
-  subscribeRealtime(orgId: string): void {
-    if (this.subscribedOrgId === orgId) return;
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.subscribedOrgId = orgId;
-    this.channel = supabase
-      .channel(`products:${orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "products",
-          filter: `org_id=eq.${orgId}`,
-        },
-        async (payload) => {
-          if (payload.eventType === "DELETE") {
-            const old = payload.old as { id?: string };
-            if (old?.id) {
-              await db.products.delete(old.id);
-            }
-            return;
-          }
-          // INSERT or UPDATE — apply LWW theo updated_at để tránh "stock nhảy lùi"
-          // khi local đã optimistic update (PaymentSheet decrement) nhưng realtime
-          // mang về snapshot cũ hơn (ví dụ event trước commit cuối).
-          const row = payload.new as ProductRow;
-          if (!row?.id) return;
-          const incoming = fromRow(row);
-          const existing = await db.products.get(incoming.id);
-          if (existing && existing.updatedAt >= incoming.updatedAt) {
-            // Local mới hơn hoặc bằng → giữ nguyên, đợi event tiếp theo
-            return;
-          }
-          await db.products.put(incoming);
-        },
-      )
-      .subscribe();
+  startPolling(orgId: string): void {
+    this.poller.start(orgId);
     if (import.meta.env.DEV) {
-      console.log(`[products-sync] subscribed realtime for org ${orgId}`);
+      console.log(`[products-sync] bắt đầu poll cho org ${orgId}`);
     }
   }
 
-  /**
-   * Cleanup channel + clear pulledOrgs cache khi signOut.
-   */
-  unsubscribeAndReset(): void {
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.subscribedOrgId = null;
+  /** Kéo ngay một nhịp, dùng sau khi outbox vừa đẩy xong. */
+  syncNow(): Promise<void> {
+    return this.poller.tick();
+  }
+
+  /** Dừng poll + xoá cache khi đăng xuất. */
+  stopAndReset(): void {
+    this.poller.stop();
     this.pulledOrgs.clear();
   }
 

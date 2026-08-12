@@ -1,7 +1,6 @@
-import type { User } from "@supabase/supabase-js";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { supabase } from "@/integrations/supabase";
+import { api, onSignedOut, type AuthUser, type UserContext } from "@/integrations/api";
 import * as authApi from "@/integrations/auth";
 import { authErrorMessage } from "@/integrations/auth";
 import type { Role } from "@/integrations/auth";
@@ -13,10 +12,6 @@ import { categoriesSync } from "@/integrations/sync/categories-sync";
 import type { Subscription } from "@/types";
 import { seedIfEmptyForOrg } from "@/lib/seed";
 
-/**
- * Organization shape khớp Supabase columns (camelCase ở client là không cần;
- * giữ snake_case từ API để khớp Postgres trả về).
- */
 export interface Organization {
   id: string;
   name: string;
@@ -30,10 +25,6 @@ export interface Organization {
   updated_at: string;
 }
 
-/**
- * Membership với org embed qua FK.
- * Query: select('org_id, role, organization:organizations(*)')
- */
 export interface MembershipWithOrg {
   org_id: string;
   role: Role;
@@ -43,23 +34,18 @@ export interface MembershipWithOrg {
 export type AuthStatus = "loading" | "unauthenticated" | "no-org" | "ready";
 
 interface AuthState {
-  // identity
-  user: User | null;
+  user: AuthUser | null;
   fullName: string | null;
 
-  // org context
   memberships: MembershipWithOrg[];
   currentOrgId: string | null;
 
-  // status
   status: AuthStatus;
   error: string | null;
 
-  // Sprint Admin SaaS
   isSuperAdmin: boolean;
   currentSubscription: Subscription | null;
 
-  // actions
   init: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error?: string }>;
   signUp: (
@@ -69,7 +55,8 @@ interface AuthState {
   ) => Promise<{ error?: string; requiresConfirm?: boolean }>;
   signOut: () => Promise<void>;
   resetPassword: (email: string) => Promise<{ error?: string }>;
-  updatePassword: (newPassword: string) => Promise<{ error?: string }>;
+  changePassword: (current: string, next: string) => Promise<{ error?: string }>;
+  resetPasswordWithToken: (token: string, next: string) => Promise<{ error?: string }>;
   createOrganization: (input: {
     name: string;
     taxCode?: string;
@@ -79,19 +66,22 @@ interface AuthState {
   loadMemberships: () => Promise<void>;
   switchOrg: (orgId: string) => Promise<void>;
   refresh: () => Promise<void>;
-  /** Sprint Admin: refetch isSuperAdmin + currentSubscription */
   loadAdminContext: () => Promise<void>;
+  /** Nội bộ: nạp kết quả /auth/me vào state. Không gọi từ component. */
+  applyContext: (ctx: UserContext) => Promise<void>;
 }
 
 /**
- * Trigger sync layer cho org hiện tại: pull (nếu chưa) + subscribe realtime.
- * KHÔNG gọi từ onAuthStateChange callback trực tiếp (deadlock supabase auth lock).
- * Wrap trong setTimeout(0) ở caller hoặc call sau khi await main flow xong.
+ * Kéo dữ liệu + bật đồng bộ định kỳ cho tiệm hiện tại.
+ *
+ * Khác bản Supabase: không còn realtime websocket, các module sync tự poll
+ * theo `updated_at` (xem từng file *-sync.ts). Bản Supabase phải defer bằng
+ * setTimeout(0) để tránh deadlock auth lock — giờ không còn lock nào nên gọi
+ * thẳng được.
  */
 async function syncForOrg(orgId: string): Promise<void> {
   if (!orgId) return;
   try {
-    // Pull data + subscribe realtime cho products / orders / goods_receipts
     await Promise.all([
       productsSync.pullProductsIfNeeded(orgId),
       ordersSync.pullOrdersIfNeeded(orgId),
@@ -99,18 +89,68 @@ async function syncForOrg(orgId: string): Promise<void> {
       stockTakeSync.pullStockTakesIfNeeded(orgId),
       categoriesSync.pullCategoriesIfNeeded(orgId),
     ]);
-    productsSync.subscribeRealtime(orgId);
-    ordersSync.subscribeRealtime(orgId);
-    inventorySync.subscribeRealtime(orgId);
-    stockTakeSync.subscribeRealtime(orgId);
-    categoriesSync.subscribeRealtime(orgId);
-    // Dev seed (chỉ DEV + orgId rỗng products): seedIfEmptyForOrg tự kiểm tra
+    productsSync.startPolling(orgId);
+    ordersSync.startPolling(orgId);
+    inventorySync.startPolling(orgId);
+    stockTakeSync.startPolling(orgId);
+    categoriesSync.startPolling(orgId);
     await seedIfEmptyForOrg(orgId);
   } catch (err) {
     if (import.meta.env.DEV) {
-      console.error("[auth.store] syncForOrg failed:", err);
+      console.error("[auth.store] syncForOrg thất bại:", err);
     }
   }
+}
+
+function stopAllSync(): void {
+  productsSync.stopAndReset();
+  ordersSync.stopAndReset();
+  inventorySync.stopAndReset();
+  stockTakeSync.stopAndReset();
+  categoriesSync.stopAndReset();
+}
+
+/** Chuyển kết quả /auth/me sang hình dạng store đang dùng. */
+function fromContext(ctx: UserContext): {
+  memberships: MembershipWithOrg[];
+  subscriptionByOrg: Map<string, Subscription>;
+} {
+  const memberships: MembershipWithOrg[] = [];
+  const subscriptionByOrg = new Map<string, Subscription>();
+
+  for (const o of ctx.organizations ?? []) {
+    memberships.push({
+      org_id: o.id,
+      role: o.role,
+      organization: {
+        id: o.id,
+        name: o.name,
+        tax_code: o.tax_code,
+        address: o.address,
+        address_full: null,
+        phone: o.phone,
+        latitude: null,
+        longitude: null,
+        created_at: "",
+        updated_at: "",
+      },
+    });
+    if (o.subscription) {
+      subscriptionByOrg.set(o.id, {
+        id: "",
+        orgId: o.id,
+        tier: o.subscription.tier,
+        status: o.subscription.status,
+        monthlyPrice: Number(o.subscription.monthly_price),
+        trialUntilDate: o.subscription.trial_until_date,
+        paidUntilDate: o.subscription.paid_until_date,
+        notes: null,
+        createdAt: "",
+        updatedAt: "",
+      } as Subscription);
+    }
+  }
+  return { memberships, subscriptionByOrg };
 }
 
 interface PersistedState {
@@ -119,23 +159,13 @@ interface PersistedState {
 
 const PERSIST_KEY = "pos.auth";
 
-// Module-level flag tránh double-subscribe khi StrictMode mount twice
 let _initialized = false;
 
-/**
- * Helper: derive current role từ memberships + currentOrgId
- */
-function deriveRole(
-  memberships: MembershipWithOrg[],
-  currentOrgId: string | null,
-): Role | null {
+function deriveRole(memberships: MembershipWithOrg[], currentOrgId: string | null): Role | null {
   if (!currentOrgId) return null;
   return memberships.find((m) => m.org_id === currentOrgId)?.role ?? null;
 }
 
-/**
- * Helper: derive currentOrg
- */
 function deriveOrg(
   memberships: MembershipWithOrg[],
   currentOrgId: string | null,
@@ -160,108 +190,60 @@ export const useAuthStore = create<AuthState>()(
         if (_initialized) return;
         _initialized = true;
 
-        /*
-         * IMPORTANT: KHÔNG dùng async/await bên trong onAuthStateChange callback.
-         * Supabase auth client giữ lock khi callback đang chạy; bất kỳ method nào
-         * cần access_token (vd. supabase.from().select()) sẽ deadlock chờ lock.
-         * Tham chiếu: supabase/auth-js#615.
-         *
-         * Pattern an toàn: handler chỉ làm set() đồng bộ, defer async bằng
-         * setTimeout(0) để callback return trước, lock được release.
-         */
-        supabase.auth.onAuthStateChange((event, session) => {
-          if (event === "SIGNED_OUT") {
-            set({
-              user: null,
-              fullName: null,
-              memberships: [],
-              currentOrgId: null,
-              status: "unauthenticated",
-              error: null,
-              isSuperAdmin: false,
-              currentSubscription: null,
-            });
-            // Cleanup sync layer (defer để release auth lock, dù chỉ là method
-            // sync, không hại nhưng nhất quán pattern)
-            setTimeout(() => {
-              productsSync.unsubscribeAndReset();
-              ordersSync.unsubscribeAndReset();
-              inventorySync.unsubscribeAndReset();
-              stockTakeSync.unsubscribeAndReset();
-              categoriesSync.unsubscribeAndReset();
-            }, 0);
-            return;
-          }
-          if (
-            event === "SIGNED_IN" ||
-            event === "TOKEN_REFRESHED" ||
-            event === "USER_UPDATED" ||
-            event === "INITIAL_SESSION"
-          ) {
-            if (session?.user) {
-              set({
-                user: session.user,
-                fullName:
-                  (session.user.user_metadata?.full_name as string | undefined) ?? null,
-              });
-              // Defer load memberships để release auth lock
-              setTimeout(() => {
-                get().loadMemberships();
-              }, 0);
-            } else if (event === "INITIAL_SESSION") {
-              // Page reload không có session → unauthenticated
-              set({ status: "unauthenticated" });
-            }
-            return;
-          }
-          if (event === "PASSWORD_RECOVERY") {
-            // Cho phép vào /reset-password — coi như ready để render form
-            if (session?.user) {
-              set({
-                user: session.user,
-                status: "ready",
-              });
-            }
-            return;
-          }
+        // Refresh token hết hạn hoặc bị thu hồi → dọn state và đưa về màn đăng
+        // nhập. Đăng ký một lần ở đây thay cho onAuthStateChange của Supabase.
+        onSignedOut(() => {
+          set({
+            user: null,
+            fullName: null,
+            memberships: [],
+            currentOrgId: null,
+            status: "unauthenticated",
+            error: null,
+            isSuperAdmin: false,
+            currentSubscription: null,
+          });
+          stopAllSync();
         });
 
-        // Trên Supabase v2.x, INITIAL_SESSION sẽ fire ngay sau subscribe
-        // → handler ở trên sẽ xử lý. Không cần manual getSession() ở đây nữa.
+        if (!api.hasSession()) {
+          set({ status: "unauthenticated" });
+          return;
+        }
+        await get().loadMemberships();
       },
 
       signIn: async (email, password) => {
         try {
-          await authApi.signInWithEmail(email, password);
-          // onAuthStateChange SIGNED_IN sẽ catch và load memberships
+          const ctx = await authApi.signInWithEmail(email, password);
+          await get().applyContext(ctx);
           return {};
         } catch (err) {
           return { error: authErrorMessage(err) };
         }
       },
 
-      signUp: async (email, password, fullName) => {
-        try {
-          const { needsEmailConfirm } = await authApi.signUpWithEmail(
-            email,
-            password,
-            fullName,
-          );
-          // Khi Confirm email TẮT: auto-login → SIGNED_IN event load memberships
-          // Khi BẬT: chưa có session, page hiển thị "Kiểm tra email"
-          return { requiresConfirm: needsEmailConfirm };
-        } catch (err) {
-          return { error: authErrorMessage(err) };
-        }
+      signUp: async () => {
+        return { error: authErrorMessage(new Error("Đăng ký công khai đang tắt")) };
       },
 
       signOut: async () => {
         try {
           await authApi.signOut();
-          // SIGNED_OUT event sẽ clear state
         } catch (err) {
-          set({ error: authErrorMessage(err) });
+          if (import.meta.env.DEV) console.warn("[auth.store] signOut:", err);
         }
+        stopAllSync();
+        set({
+          user: null,
+          fullName: null,
+          memberships: [],
+          currentOrgId: null,
+          status: "unauthenticated",
+          error: null,
+          isSuperAdmin: false,
+          currentSubscription: null,
+        });
       },
 
       resetPassword: async (email) => {
@@ -273,9 +255,20 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
-      updatePassword: async (newPassword) => {
+      changePassword: async (current, next) => {
         try {
-          await authApi.updatePassword(newPassword);
+          await authApi.changePassword(current, next);
+          // Server đã thu hồi mọi refresh token, kể cả của phiên này.
+          await get().signOut();
+          return {};
+        } catch (err) {
+          return { error: authErrorMessage(err) };
+        }
+      },
+
+      resetPasswordWithToken: async (token, next) => {
+        try {
+          await authApi.resetPasswordWithToken(token, next);
           return {};
         } catch (err) {
           return { error: authErrorMessage(err) };
@@ -285,11 +278,7 @@ export const useAuthStore = create<AuthState>()(
       createOrganization: async (input) => {
         try {
           const orgId = await authApi.createOrganization(input);
-          // Re-fetch memberships để có org mới + membership owner.
-          // loadMemberships sẽ triggerSyncForOrg cho org đầu tiên — có thể
-          // không phải orgId vừa tạo nếu user đã có org trước đó.
           await get().loadMemberships();
-          // Switch explicit sang org vừa tạo + trigger sync cho nó
           set({ currentOrgId: orgId, status: "ready" });
           await syncForOrg(orgId);
           return { orgId };
@@ -300,124 +289,89 @@ export const useAuthStore = create<AuthState>()(
 
       loadMemberships: async () => {
         try {
-          const { data, error } = await supabase
-            .from("memberships")
-            .select("org_id, role, organization:organizations(*)")
-            .returns<MembershipWithOrg[]>();
-          if (error) throw error;
-
-          const memberships = data ?? [];
-          if (memberships.length === 0) {
-            set({
-              memberships: [],
-              currentOrgId: null,
-              status: "no-org",
-              error: null,
-            });
-            return;
-          }
-
-          // Validate persisted currentOrgId vẫn match 1 membership
-          const stored = get().currentOrgId;
-          let nextOrgId: string;
-          if (stored && memberships.find((m) => m.org_id === stored)) {
-            nextOrgId = stored;
-          } else {
-            if (stored && import.meta.env.DEV) {
-              console.warn(
-                `[auth.store] persisted currentOrgId=${stored} không match memberships, fallback memberships[0]`,
-              );
-            }
-            nextOrgId = memberships[0].org_id;
-          }
-          set({
-            memberships,
-            currentOrgId: nextOrgId,
-            status: "ready",
-            error: null,
-          });
-          // Trigger sync cho org hiện tại (defer để giữ pattern an toàn,
-          // tránh chặn render). Sprint Admin: cũng load isSuperAdmin + sub.
-          setTimeout(() => {
-            syncForOrg(nextOrgId);
-            get().loadAdminContext();
-          }, 0);
+          const ctx = await api.auth.me();
+          await get().applyContext(ctx);
         } catch (err) {
           set({ error: authErrorMessage(err), status: "unauthenticated" });
         }
       },
 
+      /**
+       * Một lời gọi /auth/me trả đủ user + tiệm + vai trò + subscription +
+       * cờ super_admin, nên không cần tách loadMemberships và loadAdminContext
+       * thành hai vòng gọi mạng như bản Supabase.
+       */
+      applyContext: async (ctx: UserContext) => {
+        const { memberships, subscriptionByOrg } = fromContext(ctx);
+
+        set({
+          user: ctx.user,
+          fullName: ctx.user?.email ?? null,
+          isSuperAdmin: Boolean(ctx.is_super_admin),
+        });
+
+        if (memberships.length === 0) {
+          set({
+            memberships: [],
+            currentOrgId: null,
+            currentSubscription: null,
+            // super_admin chưa có tiệm nào vẫn phải vào được trang Quản trị
+            status: ctx.is_super_admin ? "ready" : "no-org",
+            error: null,
+          });
+          return;
+        }
+
+        const stored = get().currentOrgId;
+        const nextOrgId =
+          stored && memberships.some((m) => m.org_id === stored)
+            ? stored
+            : memberships[0].org_id;
+
+        set({
+          memberships,
+          currentOrgId: nextOrgId,
+          currentSubscription: subscriptionByOrg.get(nextOrgId) ?? null,
+          status: "ready",
+          error: null,
+        });
+
+        await syncForOrg(nextOrgId);
+      },
+
       switchOrg: async (orgId) => {
         const memberships = get().memberships;
-        if (!memberships.find((m) => m.org_id === orgId)) {
+        if (!memberships.some((m) => m.org_id === orgId)) {
           if (import.meta.env.DEV) {
             console.warn(`[auth.store] switchOrg: ${orgId} không thuộc memberships`);
           }
           return;
         }
-        if (get().currentOrgId === orgId) return; // no-op nếu đã là current
+        if (get().currentOrgId === orgId) return;
 
-        // Option B (đã chốt): KHÔNG clear Dexie. Query filter by orgId đảm bảo
-        // mỗi org chỉ thấy products của mình. Pull lần đầu cho org mới, các
-        // lần sau dùng cache.
         set({ currentOrgId: orgId });
-        await syncForOrg(orgId);
         await get().loadAdminContext();
+        await syncForOrg(orgId);
       },
 
       loadAdminContext: async () => {
-        // is_super_admin RPC
         try {
-          const { data: isAdmin } = await supabase.rpc("is_super_admin");
-          set({ isSuperAdmin: Boolean(isAdmin) });
-        } catch (err) {
-          if (import.meta.env.DEV) {
-            console.warn("[auth.store] is_super_admin check failed:", err);
-          }
-          set({ isSuperAdmin: false });
-        }
-        // Load subscription cho currentOrg
-        const orgId = get().currentOrgId;
-        if (!orgId) {
-          set({ currentSubscription: null });
-          return;
-        }
-        try {
-          const { data, error } = await supabase
-            .from("subscriptions")
-            .select("*")
-            .eq("org_id", orgId)
-            .maybeSingle();
-          if (error) throw error;
-          if (!data) {
-            set({ currentSubscription: null });
-            return;
-          }
+          const ctx = await api.auth.me();
+          const { subscriptionByOrg } = fromContext(ctx);
+          const orgId = get().currentOrgId;
           set({
-            currentSubscription: {
-              id: data.id,
-              orgId: data.org_id,
-              tier: data.tier,
-              status: data.status,
-              monthlyPrice: Number(data.monthly_price),
-              trialUntilDate: data.trial_until_date,
-              paidUntilDate: data.paid_until_date,
-              notes: data.notes,
-              createdAt: data.created_at,
-              updatedAt: data.updated_at,
-            },
+            isSuperAdmin: Boolean(ctx.is_super_admin),
+            currentSubscription: orgId ? (subscriptionByOrg.get(orgId) ?? null) : null,
           });
         } catch (err) {
           if (import.meta.env.DEV) {
-            console.warn("[auth.store] load subscription failed:", err);
+            console.warn("[auth.store] loadAdminContext thất bại:", err);
           }
-          set({ currentSubscription: null });
         }
       },
 
       refresh: async () => {
-        const { data } = await supabase.auth.getSession();
-        if (!data.session) {
+        if (!api.hasSession()) {
           set({
             user: null,
             fullName: null,
@@ -427,11 +381,6 @@ export const useAuthStore = create<AuthState>()(
           });
           return;
         }
-        set({
-          user: data.session.user,
-          fullName:
-            (data.session.user.user_metadata?.full_name as string | undefined) ?? null,
-        });
         await get().loadMemberships();
       },
     }),
@@ -441,10 +390,6 @@ export const useAuthStore = create<AuthState>()(
     },
   ),
 );
-
-// -----------------------------------------------------------------------------
-// Selectors / hooks (giảm boilerplate ở component)
-// -----------------------------------------------------------------------------
 
 export function useCurrentOrg(): Organization | null {
   return useAuthStore((s) => deriveOrg(s.memberships, s.currentOrgId));

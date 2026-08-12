@@ -40,8 +40,8 @@ Từ **01/01/2026** (Nghị định 70/2025/NĐ-CP, Thông tư 32/2025, Nghị �
 - **Quét mã vạch**: @zxing/browser cho web; sẽ thêm Capacitor + Sunmi/iMin SDK
   cho thiết bị cầm tay ở Giai đoạn 2
 - **PWA**: vite-plugin-pwa
-- **Backend (sẽ thêm)**: Supabase — Postgres + auth + realtime + storage,
-  region Singapore. Có thể tự host về sau.
+- **Backend**: ~~Supabase~~ → **API tự host** (xem mục 12). Mọi chỗ nhắc
+  Supabase phía dưới là lịch sử, KHÔNG còn đúng.
 
 ### Quy tắc khi thêm dependency
 
@@ -221,6 +221,51 @@ src/
 - Không support đặt phòng, đặt bàn, gọi món — đó là FnB/khách sạn, không
   phải tạp hóa.
 - Không hợp đồng dài hạn ép user. Trial → trả tháng → hủy bất cứ lúc nào.
+
+## 12. Backend tự host — thay Supabase (2026-08-12)
+
+**Project Supabase `lidkbryncjlwqquadywn` đã bị xoá** — hostname không còn phân
+giải DNS. Dữ liệu là test nên dựng lại trên PostgreSQL 18 sẵn có của server.
+Docker bất khả thi (VPS là máy ảo không có nested virtualization) nên self-host
+Supabase cũng loại.
+
+```
+IIS (443)
+├── /        → D:\Hosting\_iis_sites\ipos123.vn   (SPA tĩnh)
+└── /api/*   → 127.0.0.1:8210  Fastify (PM2 nuôi: ipos-api)
+                └── PostgreSQL 18, database ipos_db
+```
+
+**Hai role, đừng gộp làm một**: `ipos_owner` (NOLOGIN) sở hữu mọi bảng +
+function; `ipos_app` là role API kết nối, KHÔNG sở hữu gì. Chủ sở hữu bảng
+trong Postgres mặc định BỎ QUA RLS — để một role vừa sở hữu vừa kết nối thì
+toàn bộ policy thành trang trí. Cũng vì thế **không** cấp `GRANT ipos_owner TO
+ipos_app`: việc nào cần bỏ qua RLS thì viết thành SECURITY DEFINER function cụ
+thể trong `server/db/auth-functions.sql`.
+
+Thay thế:
+
+| Supabase | Bây giờ |
+|---|---|
+| `auth.users`, Supabase Auth | `public.users` + JWT tự phát, scrypt băm mật khẩu |
+| `auth.uid()` | `current_user_id()` đọc biến phiên `app.user_id` (LOCAL) |
+| `extensions.moddatetime` | `set_updated_at()` |
+| Realtime websocket | Poll theo `updated_at` (`src/integrations/sync/poller.ts`) |
+| Edge Function `admin-create-shop` | `POST /api/admin/create-shop` |
+| `supabase.from().select()` | `api.list(table, filters)` |
+| `supabase.rpc()` | `api.rpc()` — server có allowlist 22 RPC |
+
+File chính: `server/db/{schema,functions,auth-functions}.sql`,
+`server/src/`, `src/integrations/api.ts`.
+
+**Chưa làm**: SMTP. Link reset mật khẩu và link mời chủ shop hiện chỉ ghi ra
+log server (và trả về cho admin copy tay ở trang tạo shop).
+
+**Vận hành**: `deploy/setup-db.ps1 -Bootstrap` (1 lần) → `server/db/apply-schema.ps1`
+→ `pm2 start server/ecosystem.config.cjs`. PM2 daemon chạy dưới LocalSystem nên
+mọi lệnh pm2 phải chạy từ cửa sổ Administrator. **Không bao giờ** chạy
+`pm2 update`/`kill`/`resurrect` — chúng khởi động lại mọi app trên máy, gồm các
+website thật của project khác.
 
 ## 11. Hosting & deployment
 

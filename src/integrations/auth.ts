@@ -1,9 +1,10 @@
-import type { Session, User } from "@supabase/supabase-js";
-import { supabase } from "./supabase";
+import { api, ApiError, type AuthUser, type OrgWithRole } from "./api";
 
 /**
- * Auth helpers — wrap Supabase Auth + RPC create_organization.
- * Phase 2 stub: gọi trực tiếp, không qua Zustand. Phase 3 sẽ refactor.
+ * Lớp xác thực — gọi API tự host thay cho Supabase Auth.
+ *
+ * Giữ nguyên tên hàm và hình dạng lỗi như bản Supabase để các trang không phải
+ * sửa theo.
  */
 
 export type Role = "owner" | "cashier";
@@ -13,119 +14,114 @@ export interface Membership {
   role: Role;
 }
 
+export type { AuthUser, OrgWithRole };
+
 // -----------------------------------------------------------------------------
-// Sign in / sign up / sign out
+// Đăng nhập / đăng xuất
 // -----------------------------------------------------------------------------
 
-export async function signInWithEmail(email: string, password: string): Promise<User> {
-  const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw new AuthError(error.message, mapAuthErrorCode(error.message));
-  if (!data.user) throw new AuthError("Không lấy được thông tin user", "no-user");
-  return data.user;
+export async function signInWithEmail(email: string, password: string) {
+  try {
+    return await api.auth.login(email.trim(), password);
+  } catch (err) {
+    throw toAuthError(err);
+  }
 }
 
-export async function signUpWithEmail(
-  email: string,
-  password: string,
-  fullName: string,
-): Promise<{ user: User | null; needsEmailConfirm: boolean }> {
-  const { data, error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: {
-      data: { full_name: fullName },
-    },
-  });
-  if (error) throw new AuthError(error.message, mapAuthErrorCode(error.message));
-  // Khi "Confirm email" bật ở Dashboard, session = null (chờ user click email).
-  // Khi tắt, session có ngay → auto-login.
-  return {
-    user: data.user,
-    needsEmailConfirm: data.user !== null && data.session === null,
-  };
+/**
+ * Đăng ký công khai đã TẮT — tài khoản chủ shop do admin tạo hộ (xem trang
+ * Quản trị). Giữ hàm này để SignupPage còn chỗ bám, nhưng luôn báo lỗi rõ ràng
+ * thay vì gọi một endpoint không tồn tại.
+ */
+export async function signUpWithEmail(): Promise<never> {
+  throw new AuthError(
+    "Đăng ký công khai đang tắt. Liên hệ để được tạo tài khoản.",
+    "signup-disabled",
+  );
 }
 
 export async function signOut(): Promise<void> {
-  const { error } = await supabase.auth.signOut();
-  if (error) throw new AuthError(error.message, "sign-out-failed");
+  await api.auth.logout();
 }
 
 // -----------------------------------------------------------------------------
-// Password reset
+// Mật khẩu
 // -----------------------------------------------------------------------------
 
 export async function resetPasswordForEmail(email: string): Promise<void> {
-  const { error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/reset-password`,
-  });
-  if (error) throw new AuthError(error.message, mapAuthErrorCode(error.message));
+  try {
+    await api.auth.requestPasswordReset(email.trim());
+  } catch (err) {
+    throw toAuthError(err);
+  }
 }
 
-export async function updatePassword(newPassword: string): Promise<void> {
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
-  if (error) throw new AuthError(error.message, mapAuthErrorCode(error.message));
+/** Đặt lại mật khẩu bằng token trong link email. */
+export async function resetPasswordWithToken(token: string, newPassword: string): Promise<void> {
+  try {
+    await api.auth.resetPassword(token, newPassword);
+  } catch (err) {
+    throw toAuthError(err);
+  }
+}
+
+/**
+ * Đổi mật khẩu khi đang đăng nhập. Server thu hồi toàn bộ refresh token nên
+ * mọi thiết bị phải đăng nhập lại — cố ý, vì đổi mật khẩu thường là do nghi lộ.
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  try {
+    await api.auth.changePassword(currentPassword, newPassword);
+  } catch (err) {
+    throw toAuthError(err);
+  }
 }
 
 // -----------------------------------------------------------------------------
-// Session / user
+// Phiên
 // -----------------------------------------------------------------------------
 
-export async function getSession(): Promise<Session | null> {
-  const { data, error } = await supabase.auth.getSession();
-  if (error) throw new AuthError(error.message, "get-session-failed");
-  return data.session;
+export function hasStoredSession(): boolean {
+  return api.hasSession();
 }
 
-export async function getCurrentUser(): Promise<User | null> {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) {
-    // Không có user = không lỗi, return null
+export async function getCurrentUser(): Promise<AuthUser | null> {
+  try {
+    const ctx = await api.auth.me();
+    return ctx.user;
+  } catch {
     return null;
   }
-  return data.user;
 }
 
 // -----------------------------------------------------------------------------
-// Memberships / organization
+// Tổ chức
 // -----------------------------------------------------------------------------
 
-/**
- * Lấy danh sách memberships của user hiện tại.
- * RLS policy memberships_select_self_or_org cho phép user đọc row của chính mình.
- */
-export async function getCurrentMemberships(): Promise<Membership[]> {
-  const { data, error } = await supabase
-    .from("memberships")
-    .select("org_id, role");
-  if (error) throw new AuthError(error.message, "get-memberships-failed");
-  return (data ?? []) as Membership[];
-}
-
-/**
- * Tạo organization mới + tự gán user làm owner (atomic, qua RPC trong migration 0003).
- * Returns: org_id của tiệm vừa tạo.
- */
 export async function createOrganization(input: {
   name: string;
   taxCode?: string;
   address?: string;
   phone?: string;
 }): Promise<string> {
-  const { data, error } = await supabase.rpc("create_organization", {
-    p_name: input.name,
-    p_tax_code: input.taxCode ?? null,
-    p_address: input.address ?? null,
-    p_phone: input.phone ?? null,
-  });
-  if (error) throw new AuthError(error.message, "create-org-failed");
-  if (typeof data !== "string") {
-    throw new AuthError("RPC create_organization trả về định dạng lạ", "create-org-bad-return");
+  try {
+    const orgId = await api.rpc<string>("create_organization", {
+      p_name: input.name,
+      p_tax_code: input.taxCode ?? null,
+      p_address: input.address ?? null,
+      p_phone: input.phone ?? null,
+    });
+    if (typeof orgId !== "string") {
+      throw new AuthError("Máy chủ trả về định dạng lạ khi tạo tiệm", "create-org-bad-return");
+    }
+    return orgId;
+  } catch (err) {
+    throw toAuthError(err);
   }
-  return data;
 }
 
 // -----------------------------------------------------------------------------
-// localStorage cho currentOrgId (Phase 2 stub — Phase 3 wire vào Zustand)
+// currentOrgId trong localStorage
 // -----------------------------------------------------------------------------
 
 const ORG_KEY = "pos.currentOrgId";
@@ -148,7 +144,7 @@ export function setStoredOrgId(orgId: string | null): void {
 }
 
 // -----------------------------------------------------------------------------
-// Error normalization
+// Lỗi
 // -----------------------------------------------------------------------------
 
 export class AuthError extends Error {
@@ -162,45 +158,44 @@ export class AuthError extends Error {
 }
 
 /**
- * Map Supabase Auth error messages → mã lỗi ngắn để layer trên dịch tiếng Việt.
- * Supabase không expose error.code ổn định, phải match theo string.
+ * Chuẩn hoá lỗi từ API về AuthError.
+ *
+ * Khác bản Supabase: server tự host trả mã lỗi ổn định trong trường `error`,
+ * không phải đoán bằng cách so khớp chuỗi tiếng Anh nữa.
  */
-function mapAuthErrorCode(msg: string): string {
-  const m = msg.toLowerCase();
-  if (m.includes("invalid login credentials")) return "invalid-credentials";
-  if (m.includes("email not confirmed")) return "email-not-confirmed";
-  if (m.includes("user already registered")) return "user-exists";
-  if (m.includes("password should be at least")) return "weak-password";
-  if (m.includes("invalid email") || m.includes("email address")) return "invalid-email";
-  if (m.includes("rate limit") || m.includes("too many requests")) return "rate-limited";
-  if (m.includes("network") || m.includes("fetch")) return "network";
-  return "unknown";
+function toAuthError(err: unknown): AuthError {
+  if (err instanceof AuthError) return err;
+  if (err instanceof ApiError) {
+    return new AuthError(err.message, err.code);
+  }
+  return new AuthError(
+    err instanceof Error ? err.message : "Có lỗi xảy ra",
+    "unknown",
+  );
 }
 
-/**
- * Dịch mã lỗi sang thông báo tiếng Việt user-friendly.
- */
 export function authErrorMessage(err: unknown): string {
-  if (err instanceof AuthError) {
-    switch (err.code) {
-      case "invalid-credentials":
-        return "Email hoặc mật khẩu không đúng";
-      case "email-not-confirmed":
-        return "Email chưa xác minh. Kiểm tra hộp thư của bạn.";
-      case "user-exists":
-        return "Email đã được sử dụng";
-      case "weak-password":
-        return "Mật khẩu phải có ít nhất 6 ký tự";
-      case "invalid-email":
-        return "Email không hợp lệ";
-      case "rate-limited":
-        return "Quá nhiều lần thử. Vui lòng đợi vài phút.";
-      case "network":
-        return "Lỗi mạng. Kiểm tra kết nối và thử lại.";
-      default:
-        return err.message || "Có lỗi xảy ra, thử lại sau";
-    }
+  const e = err instanceof AuthError ? err : toAuthError(err);
+  switch (e.code) {
+    case "invalid_credentials":
+      return "Email hoặc mật khẩu không đúng";
+    case "too_many_attempts":
+      return "Sai quá nhiều lần. Thử lại sau 15 phút.";
+    case "wrong_password":
+      return "Mật khẩu hiện tại không đúng";
+    case "invalid_token":
+      return "Link không hợp lệ hoặc đã hết hạn";
+    case "unauthorized":
+      return "Phiên đã hết hạn, đăng nhập lại";
+    case "forbidden":
+      return "Bạn không có quyền thực hiện việc này";
+    case "network":
+      return "Không kết nối được máy chủ. Kiểm tra mạng và thử lại.";
+    case "bad_response":
+      return "Máy chủ trả về dữ liệu không hợp lệ";
+    case "signup-disabled":
+      return e.message;
+    default:
+      return e.message || "Có lỗi xảy ra, thử lại sau";
   }
-  if (err instanceof Error) return err.message;
-  return "Có lỗi xảy ra, thử lại sau";
 }

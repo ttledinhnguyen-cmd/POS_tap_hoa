@@ -268,3 +268,49 @@ begin
   return v_result;
 end;
 $$;
+
+-- -----------------------------------------------------------------------------
+-- Gắn chủ shop vào tiệm vừa tạo (thay phần Edge Function admin-create-shop làm)
+-- -----------------------------------------------------------------------------
+-- Tìm user theo email, chưa có thì tạo với mật khẩu ngẫu nhiên do tầng API băm
+-- sẵn (chủ shop sẽ đặt lại qua link mời), rồi gắn làm owner của tiệm.
+--
+-- Chỉ super_admin gọi được — kiểm tra ngay trong hàm vì SECURITY DEFINER bỏ
+-- qua RLS.
+create or replace function public.admin_attach_owner(
+  p_org_id        uuid,
+  p_email         text,
+  p_password_hash text
+) returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user_id uuid;
+  v_created boolean := false;
+  v_clean   text := lower(btrim(p_email));
+begin
+  if not public.is_super_admin() then
+    raise exception 'Forbidden: super_admin only';
+  end if;
+  if v_clean = '' or v_clean not like '%_@_%._%' then
+    raise exception 'Email không hợp lệ';
+  end if;
+
+  select id into v_user_id from public.users where lower(email) = v_clean;
+
+  if v_user_id is null then
+    insert into public.users (email, password_hash)
+    values (v_clean, p_password_hash)
+    returning id into v_user_id;
+    v_created := true;
+  end if;
+
+  insert into public.memberships (user_id, org_id, role)
+  values (v_user_id, p_org_id, 'owner')
+  on conflict (user_id, org_id) do nothing;
+
+  return jsonb_build_object('user_id', v_user_id, 'created', v_created);
+end;
+$$;

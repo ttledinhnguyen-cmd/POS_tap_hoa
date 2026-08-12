@@ -70,9 +70,13 @@ export default defineConfig({
   server: {
     host: true,
     port: 5173,
-    // Allow tunneling host (ngrok/cloudflare) khi demo cho chủ shop.
-    // Chỉ ảnh hưởng dev server — production build serve qua Caddy không bị ràng buộc này.
-    // Leading dot = subdomain wildcard.
+    // Dev chạy 5173 còn API chạy 8210. Proxy để dev cùng origin như
+    // production, khỏi phải bật CORS riêng cho môi trường dev.
+    proxy: {
+      "/api": { target: "http://127.0.0.1:8210", changeOrigin: false },
+    },
+    // Cho phép host tunnel (ngrok/cloudflare) khi demo cho chủ shop.
+    // Chỉ ảnh hưởng dev server. Dấu chấm đầu = wildcard subdomain.
     allowedHosts: ["majorette-blatantly-swerve.ngrok-free.dev", "localhost", ".ngrok-free.dev", ".ngrok-free.app", ".ngrok.app", ".trycloudflare.com"],
   },
   build: {
@@ -83,7 +87,6 @@ export default defineConfig({
         // @zxing KHÔNG manual chunk — sẽ tự thành chunk riêng qua dynamic import
         // trong BarcodeScanner (load on-demand khi user click "Quét mã").
         manualChunks: {
-          supabase: ["@supabase/supabase-js"],
           dexie: ["dexie", "dexie-react-hooks"],
           "react-vendor": ["react", "react-dom", "react-router-dom"],
           zustand: ["zustand"],

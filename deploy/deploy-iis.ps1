@@ -39,17 +39,20 @@ Write-Host "Project: $ProjectRoot"
 # (src/integrations/supabase.ts), ra trang trắng — nên chặn từ đây.
 Write-Host "`n[1/5] Kiểm tra biến môi trường..." -ForegroundColor Yellow
 
-$envFile = Join-Path $ProjectRoot '.env.local'
-if (-not (Test-Path $envFile)) {
-    throw "Thiếu .env.local. Copy .env.example → .env.local và điền VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY."
+# Backend giờ là API tự host cùng origin, không còn biến Supabase bắt buộc.
+# Thứ cần kiểm tra là server/.env — thiếu nó thì API không chạy và app đăng
+# nhập được vào đâu.
+$serverEnv = Join-Path $ProjectRoot 'server\.env'
+if (-not (Test-Path $serverEnv)) {
+    throw "Thiếu server\.env. Chạy .\deploy\setup-db.ps1 -Bootstrap trước."
 }
-$envText = Get-Content $envFile -Raw
-foreach ($key in 'VITE_SUPABASE_URL', 'VITE_SUPABASE_ANON_KEY') {
-    if ($envText -notmatch "(?m)^\s*$key\s*=\s*\S+") {
-        throw "Thiếu $key trong .env.local — build ra sẽ là app trắng màn hình."
+$serverText = Get-Content $serverEnv -Raw
+foreach ($key in 'DATABASE_URL', 'JWT_SECRET') {
+    if ($serverText -notmatch "(?m)^\s*$key\s*=\s*\S+") {
+        throw "Thiếu $key trong server\.env — API sẽ không khởi động được."
     }
 }
-Write-Host "  OK"
+Write-Host "  server\.env: OK"
 
 # --- [2/5] Build ------------------------------------------------------------
 if ($SkipBuild) {
@@ -72,13 +75,15 @@ if (-not (Test-Path (Join-Path $DistDir 'index.html'))) {
     throw "Không thấy dist\index.html — build chưa xong hoặc đã fail."
 }
 
-# Xác nhận Supabase URL thực sự nằm trong bundle, không chỉ tin vào .env.local
+# Chốt chặn hồi quy: bundle không được còn dấu vết Supabase. Nếu còn nghĩa là
+# một file nào đó bị bỏ sót khi chuyển sang API tự host, và nó sẽ gọi tới một
+# project đã bị xoá — lỗi chỉ lộ ra khi user bấm đúng chức năng đó.
 $supaHit = Select-String -Path (Join-Path $DistDir 'assets\*.js') `
     -Pattern 'supabase\.co' -List -ErrorAction SilentlyContinue
-if (-not $supaHit) {
-    throw "Bundle không chứa Supabase URL — biến VITE_* không được inline. Kiểm tra .env.local rồi build lại."
+if ($supaHit) {
+    throw "Bundle vẫn còn tham chiếu supabase.co ($($supaHit[0].Filename)) — còn file chưa chuyển sang API tự host."
 }
-Write-Host "  index.html + Supabase config: OK"
+Write-Host "  index.html + không còn Supabase: OK"
 
 # Chốt chặn hồi quy: PWA từng hỏng âm thầm suốt thời gian dài vì build vẫn
 # pass khi service worker bị tắt. Không có sw.js = mất bán hàng offline.

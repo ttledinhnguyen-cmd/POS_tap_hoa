@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 
 export interface BarcodeInfo {
   source: "shared" | "openfoodfacts";
@@ -36,14 +36,18 @@ export async function lookupBarcode(barcode: string): Promise<BarcodeInfo | null
   const clean = normalize(barcode);
   if (!clean) return null;
 
-  // 1. Supabase shared_barcodes (read public, fast)
+  // 1. Kho mã vạch dùng chung trên server mình (nhanh, ưu tiên cao nhất)
   try {
-    const { data, error } = await supabase
-      .from("shared_barcodes")
-      .select("barcode, name, brand, image_url, default_unit, category")
-      .eq("barcode", clean)
-      .maybeSingle();
-    if (!error && data) {
+    const rows = await api.list<{
+      barcode: string;
+      name: string;
+      brand: string | null;
+      image_url: string | null;
+      default_unit: string | null;
+      category: string | null;
+    }>("shared_barcodes", { barcode: clean });
+    const data = rows[0];
+    if (data) {
       return {
         source: "shared",
         barcode: data.barcode,
@@ -124,7 +128,7 @@ export async function contributeBarcode(info: {
   if (!clean) return;
   if (!info.name.trim()) return;
   try {
-    await supabase.rpc("contribute_barcode", {
+    await api.rpc("contribute_barcode", {
       p_barcode: clean,
       p_name: info.name.trim(),
       p_brand: info.brand?.trim() || null,

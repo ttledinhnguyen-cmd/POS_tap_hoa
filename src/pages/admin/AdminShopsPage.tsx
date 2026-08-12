@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { LayoutList, Loader2, Map as MapIcon, Plus, Search } from "lucide-react";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { Button } from "@/components/ui/Button";
 import { formatVND } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -60,10 +60,9 @@ export function AdminShopsPage() {
     setLoading(true);
     (async () => {
       try {
-        const { data, error: err } = await supabase.rpc("admin_list_shops");
+        const data = await api.rpc<ShopWithStats[]>("admin_list_shops");
         if (cancelled) return;
-        if (err) throw err;
-        setShops((data ?? []) as ShopWithStats[]);
+        setShops(data ?? []);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : "Tải shops thất bại");

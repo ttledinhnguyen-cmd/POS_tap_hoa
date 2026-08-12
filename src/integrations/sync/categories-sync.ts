@@ -1,7 +1,6 @@
-import type { RealtimeChannel } from "@supabase/supabase-js";
 import { db } from "@/lib/db";
 import type { Category } from "@/types";
-import { supabase } from "@/integrations/supabase";
+import { api } from "@/integrations/api";
 import { productsSync } from "@/integrations/sync/products-sync";
 
 interface CategoryRow {
@@ -24,42 +23,35 @@ function fromRow(row: CategoryRow): Category {
   };
 }
 
+// Danh mục ít thay đổi và mỗi tiệm chỉ có vài chục dòng, nên poll thưa.
+const POLL_MS = 60_000;
+
 /**
- * Categories sync — RPC-driven (KHÔNG outbox vì owner manage trực tiếp,
- * cần feedback realtime). Pattern khớp stock-take-sync.
+ * Đồng bộ danh mục — đi thẳng qua RPC, KHÔNG qua outbox, vì chủ tiệm quản lý
+ * trực tiếp và cần thấy kết quả ngay.
  *
- * Cascade rename: server-side trong RPC update_category, client refetch
- * products qua realtime subscription (products-sync) hoặc force pullProducts
- * sau rename để Dexie sync ngay.
+ * Khác các module khác: mỗi nhịp poll kéo TOÀN BỘ danh mục của tiệm chứ không
+ * kéo tăng dần theo updated_at. Lý do: danh mục bị xoá ở máy khác thì bản kéo
+ * tăng dần không bao giờ biết, mà xoá danh mục là thao tác có thật ở đây. Vài
+ * chục dòng thì kéo hết cũng không tốn gì.
  */
 class CategoriesSync {
-  private channel: RealtimeChannel | null = null;
-  private subscribedOrgId: string | null = null;
   private pulledOrgs: Set<string> = new Set();
+  private timer: number | null = null;
+  private orgId: string | null = null;
 
   async pullCategories(orgId: string): Promise<void> {
     if (!orgId) return;
-    const { data, error } = await supabase
-      .from("categories")
-      .select("*")
-      .eq("org_id", orgId)
-      .order("display_order", { ascending: true });
-    if (error) {
-      console.error("[categories-sync] pull failed:", error.message);
-      throw error;
-    }
-    const rows = (data ?? []) as CategoryRow[];
+    const rows = await api.list<CategoryRow>("categories", { org_id: orgId });
     const cats = rows.map(fromRow);
-    // Replace cache: clear org's existing rows trước khi bulkPut để tránh stale
+    // Thay nguyên cụm để danh mục đã xoá không còn sót lại trong cache
     await db.transaction("rw", db.categories, async () => {
       await db.categories.where("orgId").equals(orgId).delete();
       if (cats.length) await db.categories.bulkPut(cats);
     });
     this.pulledOrgs.add(orgId);
     if (import.meta.env.DEV) {
-      console.log(
-        `[categories-sync] pulled ${cats.length} categories for org ${orgId}`,
-      );
+      console.log(`[categories-sync] đã kéo ${cats.length} danh mục cho org ${orgId}`);
     }
   }
 
@@ -68,79 +60,41 @@ class CategoriesSync {
     await this.pullCategories(orgId);
   }
 
-  subscribeRealtime(orgId: string): void {
-    if (this.subscribedOrgId === orgId) return;
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
-    }
-    this.subscribedOrgId = orgId;
-    this.channel = supabase
-      .channel(`categories:${orgId}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "categories",
-          filter: `org_id=eq.${orgId}`,
-        },
-        async (payload) => {
-          if (payload.eventType === "DELETE") {
-            const old = payload.old as { id?: string };
-            if (old?.id) await db.categories.delete(old.id);
-            return;
-          }
-          const row = payload.new as CategoryRow;
-          if (!row?.id) return;
-          const incoming = fromRow(row);
-          const existing = await db.categories.get(incoming.id);
-          if (existing && existing.updatedAt >= incoming.updatedAt) return;
-          await db.categories.put(incoming);
-        },
-      )
-      .subscribe();
-    if (import.meta.env.DEV) {
-      console.log(`[categories-sync] subscribed realtime for org ${orgId}`);
-    }
+  startPolling(orgId: string): void {
+    if (this.orgId === orgId && this.timer !== null) return;
+    this.stopAndReset();
+    this.orgId = orgId;
+    this.timer = window.setInterval(() => {
+      if (!navigator.onLine) return;
+      void this.pullCategories(orgId).catch(() => undefined);
+    }, POLL_MS);
   }
 
-  unsubscribeAndReset(): void {
-    if (this.channel) {
-      this.channel.unsubscribe();
-      this.channel = null;
+  stopAndReset(): void {
+    if (this.timer !== null) {
+      clearInterval(this.timer);
+      this.timer = null;
     }
-    this.subscribedOrgId = null;
+    this.orgId = null;
     this.pulledOrgs.clear();
   }
 
-  // ---- RPC actions ----
+  // ---- Thao tác qua RPC ----
 
-  /** Tạo category mới (idempotent server-side qua unique). Returns id. */
+  /** Tạo danh mục. Server idempotent theo (org, tên) nên gọi lại trả cùng id. */
   async create(orgId: string, name: string): Promise<string> {
-    const { data, error } = await supabase.rpc("create_category", {
-      p_org_id: orgId,
-      p_name: name,
-    });
-    if (error) throw error;
-    // Realtime sẽ fire INSERT; vẫn pull để chắc chắn UI update ngay
+    const id = await api.rpc<string>("create_category", { p_org_id: orgId, p_name: name });
     await this.pullCategories(orgId);
-    return data as string;
+    return id;
   }
 
   /**
-   * Rename category — server cascade UPDATE products. Sau RPC, force
-   * pullProducts để Dexie products đồng bộ ngay (realtime sẽ chỉ fire UPDATE
-   * cho từng product → có thể chậm/race).
+   * Đổi tên — server cascade sang products.category. Phải kéo lại products
+   * ngay, nếu không màn hình lọc theo danh mục sẽ hiện tên cũ cho tới nhịp poll
+   * kế tiếp.
    */
   async rename(id: string, newName: string): Promise<void> {
-    const { error } = await supabase.rpc("update_category", {
-      p_id: id,
-      p_new_name: newName,
-      p_new_order: null,
-    });
-    if (error) throw error;
-    // Refetch category + products
+    await api.rpc("update_category", { p_id: id, p_new_name: newName, p_new_order: null });
     const cat = await db.categories.get(id);
     if (cat) {
       await this.pullCategories(cat.orgId);
@@ -149,24 +103,15 @@ class CategoriesSync {
   }
 
   async changeOrder(id: string, newOrder: number): Promise<void> {
-    const { error } = await supabase.rpc("update_category", {
-      p_id: id,
-      p_new_name: null,
-      p_new_order: newOrder,
-    });
-    if (error) throw error;
+    await api.rpc("update_category", { p_id: id, p_new_name: null, p_new_order: newOrder });
     const cat = await db.categories.get(id);
     if (cat) await this.pullCategories(cat.orgId);
   }
 
-  /**
-   * Delete category — server SET products.category = NULL cascade. Sau RPC
-   * pull products để Dexie nhận products mồ côi (category null → "Khác").
-   */
+  /** Xoá — server set products.category = NULL, sản phẩm mồ côi rơi vào "Khác". */
   async delete(id: string): Promise<void> {
     const cat = await db.categories.get(id);
-    const { error } = await supabase.rpc("delete_category", { p_id: id });
-    if (error) throw error;
+    await api.rpc("delete_category", { p_id: id });
     if (cat) {
       await this.pullCategories(cat.orgId);
       await productsSync.pullProducts(cat.orgId).catch(() => undefined);
@@ -174,11 +119,7 @@ class CategoriesSync {
   }
 
   async reorder(orgId: string, orderedIds: string[]): Promise<void> {
-    const { error } = await supabase.rpc("reorder_categories", {
-      p_org_id: orgId,
-      p_ordered_ids: orderedIds,
-    });
-    if (error) throw error;
+    await api.rpc("reorder_categories", { p_org_id: orgId, p_ordered_ids: orderedIds });
     await this.pullCategories(orgId);
   }
 }

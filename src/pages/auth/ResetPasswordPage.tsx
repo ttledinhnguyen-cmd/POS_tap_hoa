@@ -4,7 +4,6 @@ import { Loader2 } from "lucide-react";
 import { AuthLayout } from "@/components/layout/AuthLayout";
 import { FormField } from "@/components/ui/FormField";
 import { Button } from "@/components/ui/Button";
-import { supabase } from "@/integrations/supabase";
 import { useAuthStore } from "@/stores/auth";
 import { vibrate } from "@/lib/utils";
 
@@ -23,35 +22,16 @@ export function ResetPasswordPage() {
   const [submitError, setSubmitError] = useState<string>();
   const [loading, setLoading] = useState(false);
 
-  const updatePassword = useAuthStore((s) => s.updatePassword);
+  const resetPasswordWithToken = useAuthStore((s) => s.resetPasswordWithToken);
+  const [token, setToken] = useState<string | null>(null);
 
-  // Supabase client (detectSessionInUrl=true) tự parse hash khi mount.
-  // Đợi 1 tick rồi check session để biết có token hợp lệ không.
+  // Backend tự host gửi token đặt lại qua query string (?token=...), khác
+  // Supabase vốn nhét session vào hash và tự parse. Ở đây chỉ cần đọc query;
+  // token đúng hay sai thì server phán khi bấm gửi — không lộ trước cho kẻ dò.
   useEffect(() => {
-    let cancelled = false;
-    async function check() {
-      // Đợi auth state event (PASSWORD_RECOVERY) hoặc check session trực tiếp
-      const { data } = await supabase.auth.getSession();
-      if (cancelled) return;
-      if (data.session) {
-        setLoadState("valid");
-      } else {
-        setLoadState("invalid");
-      }
-    }
-    check();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((event) => {
-      if (cancelled) return;
-      if (event === "PASSWORD_RECOVERY" || event === "SIGNED_IN") {
-        setLoadState("valid");
-      }
-    });
-
-    return () => {
-      cancelled = true;
-      sub.subscription.unsubscribe();
-    };
+    const t = new URLSearchParams(window.location.search).get("token");
+    setToken(t);
+    setLoadState(t ? "valid" : "invalid");
   }, []);
 
   const handleSubmit = async (e: FormEvent) => {
@@ -65,8 +45,13 @@ export function ResetPasswordPage() {
     setSubmitError(undefined);
     if (Object.keys(next).length > 0) return;
 
+    if (!token) {
+      setSubmitError("Link không hợp lệ hoặc đã hết hạn");
+      return;
+    }
+
     setLoading(true);
-    const { error } = await updatePassword(password);
+    const { error } = await resetPasswordWithToken(token, password);
     setLoading(false);
     vibrate(15);
 
@@ -74,10 +59,8 @@ export function ResetPasswordPage() {
       setSubmitError(error);
       return;
     }
-    // Sign out để ép user login lại với password mới
-    // (gọi supabase trực tiếp, không qua store, vì store SIGNED_OUT sẽ navigate
-    // qua AuthGuard — nhưng ta muốn redirect specific URL với query param)
-    await supabase.auth.signOut();
+    // Đặt lại xong thì chưa có phiên nào — server đã thu hồi hết. Đưa thẳng về
+    // màn đăng nhập kèm cờ để hiện thông báo thành công.
     navigate("/login?reset=success", { replace: true });
   };
 
