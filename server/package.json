@@ -1,0 +1,16 @@
+{
+  "name": "ipos-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "API cho Tạp Hóa POS — thay Supabase, chạy trên VPS",
+  "scripts": {
+    "start": "node --env-file=.env src/index.js",
+    "dev": "node --env-file=.env --watch src/index.js"
+  },
+  "dependencies": {
+    "fastify": "^5.2.0",
+    "jsonwebtoken": "^9.0.2",
+    "pg": "^8.13.1"
+  }
+}

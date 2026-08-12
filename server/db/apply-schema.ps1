@@ -98,9 +98,10 @@ Invoke-SqlFile -Path (Join-Path $DbDir 'schema.sql') -AsRole $OwnerRole
 $n = (Invoke-Sql -Sql "select count(*) from pg_tables where schemaname='public';").Trim()
 Write-Host "  $n bảng" -ForegroundColor Green
 
-# --- [4/6] functions.sql ------------------------------------------------------
-Write-Host "`n[4/6] functions.sql..." -ForegroundColor Yellow
+# --- [4/6] functions.sql + auth-functions.sql ---------------------------------
+Write-Host "`n[4/6] functions.sql + auth-functions.sql..." -ForegroundColor Yellow
 Invoke-SqlFile -Path (Join-Path $DbDir 'functions.sql') -AsRole $OwnerRole
+Invoke-SqlFile -Path (Join-Path $DbDir 'auth-functions.sql') -AsRole $OwnerRole
 $f = (Invoke-Sql -Sql "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';").Trim()
 Write-Host "  $f function" -ForegroundColor Green
 
