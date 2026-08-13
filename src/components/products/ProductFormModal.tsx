@@ -80,6 +80,8 @@ export function ProductFormModal({
   const [barcode, setBarcode] = useState("");
   const [name, setName] = useState("");
   const [unit, setUnit] = useState("cái");
+  const [packUnit, setPackUnit] = useState("");
+  const [packSize, setPackSize] = useState("");
   const [priceSell, setPriceSell] = useState("");
   const [priceCost, setPriceCost] = useState("");
   const [stock, setStock] = useState("");
@@ -104,6 +106,8 @@ export function ProductFormModal({
       setBarcode(product.barcode);
       setName(product.name);
       setUnit(product.unit);
+      setPackUnit(product.packUnit ?? "");
+      setPackSize(product.packSize ? String(product.packSize) : "");
       setPriceSell(String(product.priceSell));
       setPriceCost(String(product.priceCost));
       setStock(String(product.stock));
@@ -114,6 +118,8 @@ export function ProductFormModal({
       setBarcode(initialBarcode ?? "");
       setName("");
       setUnit("cái");
+      setPackUnit("");
+      setPackSize("");
       setPriceSell("");
       setPriceCost("");
       setStock("");
@@ -232,6 +238,8 @@ export function ProductFormModal({
         stock: s,
         taxRate,
         category: trimmedCategory || undefined,
+        packSize: Number(packSize) > 0 ? Number(packSize) : undefined,
+        packUnit: packSize && Number(packSize) > 0 ? (packUnit.trim() || "thùng") : undefined,
       });
       // Trigger drain ngay (UX feedback nhanh)
       outboxWorker.drainNow();
@@ -394,6 +402,34 @@ export function ProductFormModal({
                 value={stock}
                 onChange={(e) => setStock(e.target.value)}
                 placeholder="0"
+              />
+            </FormField>
+          </div>
+
+          {/* Quy cách đóng gói — để lúc nhập kho gõ theo thùng, khỏi tự nhẩm
+              phép chia ra giá mỗi đơn vị bán. Bỏ trống nếu nhập và bán cùng
+              đơn vị (gạo, trứng lẻ). */}
+          <div className="grid grid-cols-2 gap-3">
+            <FormField label="Đơn vị nhập" optional hint="thùng, lốc, bao…">
+              <input
+                type="text"
+                value={packUnit}
+                onChange={(e) => setPackUnit(e.target.value)}
+                placeholder="thùng"
+              />
+            </FormField>
+            <FormField
+              label={`1 ${packUnit.trim() || "thùng"} = ? ${unit.trim() || "đơn vị"}`}
+              optional
+            >
+              <input
+                type="number"
+                inputMode="decimal"
+                step="1"
+                min="0"
+                value={packSize}
+                onChange={(e) => setPackSize(e.target.value)}
+                placeholder="24"
               />
             </FormField>
           </div>

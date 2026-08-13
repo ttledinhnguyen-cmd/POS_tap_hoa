@@ -55,8 +55,19 @@ function Invoke-Sql {
 
 function Invoke-SqlFile {
     param([string]$Path, [string]$AsRole)
+    $body = Get-Content -LiteralPath $Path -Raw -Encoding UTF8
+
+    # CREATE EXTENSION đòi quyền CREATE trên database, mà ipos_owner không có.
+    # Tách ra chạy bằng superuser TRƯỚC khi hạ quyền. Không tách thì bản cài mới
+    # chết ngay ở dòng đầu tiên — đúng lỗi này đã làm apply-schema.ps1 chưa bao
+    # giờ chạy được trên database trắng.
+    foreach ($ext in [regex]::Matches($body, '(?im)^\s*create extension[^;]+;')) {
+        $ext.Value | & $psql -h $PgHost -p $PgPort -U $SuperUser -d $DbName -q 2>&1 | Out-Null
+    }
+    $body = [regex]::Replace($body, '(?im)^\s*create extension[^;]+;', '')
+
     # SET ROLE ở đầu phiên → mọi object DDL sau đó thuộc sở hữu của role đó.
-    $sql = "set role $AsRole;`n" + (Get-Content -LiteralPath $Path -Raw -Encoding UTF8)
+    $sql = "set role $AsRole;`n" + $body
     $out = $sql | & $psql -h $PgHost -p $PgPort -U $SuperUser -d $DbName -v ON_ERROR_STOP=1 -q 2>&1
     if ($LASTEXITCODE -ne 0) { throw "Lỗi khi chạy $(Split-Path $Path -Leaf):`n$out" }
 }
@@ -104,6 +115,33 @@ Invoke-SqlFile -Path (Join-Path $DbDir 'functions.sql') -AsRole $OwnerRole
 Invoke-SqlFile -Path (Join-Path $DbDir 'auth-functions.sql') -AsRole $OwnerRole
 $f = (Invoke-Sql -Sql "select count(*) from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public';").Trim()
 Write-Host "  $f function" -ForegroundColor Green
+
+# --- [4b/6] Migrations --------------------------------------------------------
+# schema.sql chỉ là ẢNH CHỤP TẠI THỜI ĐIỂM TÁCH KHỎI SUPABASE. Mọi thay đổi sau
+# đó nằm ở migrations/ và là NGUỒN SỰ THẬT. Không chép tay migration ngược vào
+# schema.sql — chép tay là sót, mà sót chỉ lộ ra lúc khôi phục sau sự cố.
+#
+# Migration đều idempotent (IF NOT EXISTS / OR REPLACE) nên replay lại vô hại.
+$migDir = Join-Path $DbDir 'migrations'
+if (Test-Path $migDir) {
+    $migrations = Get-ChildItem $migDir -Filter '*.sql' | Sort-Object Name
+    Write-Host "`n[4b/6] Migrations ($($migrations.Count) file)..." -ForegroundColor Yellow
+    foreach ($m in $migrations) {
+        # Vài migration cần superuser (CREATE EXTENSION). Chạy phần đó trước
+        # khi hạ quyền xuống ipos_owner.
+        $body = Get-Content -LiteralPath $m.FullName -Raw -Encoding UTF8
+        foreach ($ext in [regex]::Matches($body, '(?im)^\s*create extension[^;]+;')) {
+            Invoke-Sql -Sql $ext.Value | Out-Null
+        }
+        $stripped = [regex]::Replace($body, '(?im)^\s*create extension[^;]+;', '')
+        $sql = "set role $OwnerRole;`n" + $stripped
+        $out = $sql | & $psql -h $PgHost -p $PgPort -U $SuperUser -d $DbName -v ON_ERROR_STOP=1 -q 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            throw "Migration $($m.Name) lỗi:`n$($out | Where-Object { $_ -notmatch 'NOTICE' })"
+        }
+        Write-Host "  $($m.Name)" -ForegroundColor Green
+    }
+}
 
 # --- [5/6] Quyền cho ipos_app -------------------------------------------------
 Write-Host "`n[5/6] Cấp quyền cho $AppRole..." -ForegroundColor Yellow

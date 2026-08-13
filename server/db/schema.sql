@@ -25,7 +25,13 @@
 --               và một lỗi thiếu WHERE org_id trong API sẽ làm lộ dữ liệu
 --               giữa các tiệm.
 --
--- Áp dụng: server/db/apply-schema.ps1 (chạy bằng superuser, tự lo phần role).
+-- FILE NÀY LÀ ẢNH CHỤP TẠI THỜI ĐIỂM TÁCH KHỎI SUPABASE, KHÔNG PHẢI TRẠNG THÁI
+-- HIỆN TẠI. Mọi thay đổi sau đó nằm ở server/db/migrations/ và đó mới là nguồn
+-- sự thật. Đừng chép tay migration ngược vào đây — chép tay là sót, mà sót chỉ
+-- lộ ra đúng lúc cần nhất: khi khôi phục sau sự cố.
+--
+-- Áp dụng: server/db/apply-schema.ps1 chạy file này rồi replay toàn bộ
+-- migration theo thứ tự tên. Bản cài mới vì thế luôn khớp với DB đang chạy.
 -- =============================================================================
 
 create extension if not exists pgcrypto;
